@@ -1,0 +1,2587 @@
+/*===============================================================================*\
+|#######################    [PsxFX Shader Suite v2.00]    ########################|
+|#########################         By Asmodean          ##########################|
+||                                                                               ||
+||          This program is free software; you can redistribute it and/or        ||
+||          modify it under the terms of the GNU General Public License          ||
+||          as published by the Free Software Foundation; either version 2       ||
+||          of the License, or (at your option) any later version.               ||
+||                                                                               ||
+||          This program is distributed in the hope that it will be useful,      ||
+||          but WITHOUT ANY WARRANTY; without even the implied warranty of       ||
+||          MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the        ||
+||          GNU General Public License for more details. (c)2016                 ||
+||                                                                               ||
+|#################################################################################|
+\*===============================================================================*/
+#version 150 compatibility
+
+#extension GL_NV_gpu_shader5 : enable
+#extension GL_ARB_gpu_shader5 : enable
+#extension GL_ARB_shader_precision : enable
+#extension GL_ARB_texture_rectangle : enable
+
+/*------------------------------------------------------------------------------
+                       [DEFINITIONS & ON/OFF OPTIONS]
+------------------------------------------------------------------------------*/
+
+//--------------------------#[CHOOSE EFFECTS]#--------------------------------\\
+
+//#[ANTIALIASING TECHNIQUES]   [1=ON|0=OFF]  #NOTE: For best results: use an antialiasing OR filtering technique. Not both together.
+#define FXAA                        1      //# High Quality Fast Approximate Anti Aliasing. With optional bilateral filtering within the samples for smooth gradients.
+#define NFAA                        0      //# Normal Filter Anti Aliasing. Subtle AA, with good edge detection, little to no blur. works better with 3D only.
+#define SSAA                        0      //# Shader-Based Pseudo SuperSampling. A light AA that scales well with high resolutions. (2D & 3D).
+
+//#[FS SCALING TECHNIQUES]     [1=ON|0=OFF]  #NOTE: For best results: Only enable one type of filtering at one time. Use post antialiasing OR FS filtering, not both.
+#define BILINEAR_FILTERING          0      //# Bilinear Fullscreen Texture Filtering. BiLinear filtering - light to medium filtering of textures.[2D]
+#define BICUBIC_FILTERING           0      //# Bicubic Fullscreen Texture Filtering. BiCubic filtering - medium to strong filtering of textures.[2D]
+#define GAUSSIAN_FILTERING          0      //# Gaussian Fullscreen Texture Filtering. Gaussian filtering - strong to extra strong filtering of textures.[2D]
+#define BILATERAL_FILTERING         0      //# Bilateral Fullscreen Texture Filtering. Smoothes color gradient transitions and reduces dithering artifacts.[2D]
+#define BICUBLIC_SCALER             0      //# Bicubic Interpolation Scaling. Uses BCS on up scaling, and downsampling of games, for smoother scaling.
+#define LANCZOS_SCALER              0      //# Lanczos Interpolation Scaling. Uses Lanczos on up scaling, and downsampling of games for smoother scaling.
+
+//#[LIGHTING & COLOUR]         [1=ON|0=OFF]  #NOTE: These can all be turned on & off independently of each other. [For High Dynamic Range(HDR) use Bloom & Tonemapping together]
+#define PHONG_SHADING               0      //# Per-Pixel Phong Shading. Simulates lighting calculations on a per-pixel basis, with attenuation (lighting enhancement).
+#define BLENDED_BLOOM               0      //# High Quality SP Bloom. Soft lighting with blending techniques, for a natural looking bloom.
+#define SCENE_TONEMAPPING           0      //# HDR Scene Tonemapping. Layered component conversion, and applies scene tone mapping.
+#define COLOR_CORRECTION            0      //# Component Color Correction. Colorspace conversion, with correction curves, and multiple palette types.
+#define CROSS_PROCESSING            0      //# Filmic Cross Processing. Alters the tone of the scene, crossing the game's color set, with another.
+#define GAMMA_CORRECTION            0      //# RGB Gamma Correction. Fixed expansion to variable compression gamma correction curve.
+#define PIXEL_VIBRANCE              0      //# Pixel Vibrance. Intelligently adjusts pixel vibrance depending on original color saturation.
+#define COLOR_GRADING               0      //# Post-Complement Colour Grading. Alters individual colour components on a scene, to manip selected colour tones.
+#define TEXTURE_SHARPEN             0      //# Bicubic Texture Unsharp Mask. Looks similar to a negative texture LOD bias. Enhances texture fidelity.
+#define CURVE_CONTRAST              0      //# S-Curve Scene Contrast Enhancement. Locally adjusts contrast using a four-point cubic bezier spline.
+#define CEL_SHADING                 0      //# PX Cel Shading. A pixel-based cel shader, with a luminance edge filter for avoiding edge effects on menus & text. 
+#define PAINT_SHADING               0      //# Paint Shading. Creates the effect of a painted scene. Cel shaded edges can also be enabled for a story book effect.
+
+//#[TV EMU TECHNIQUES]         [1=ON|0=OFF]  #NOTE: These can all be turned on & off independently of each other. These effects are typically used to simulated older TVs/utility, etc.
+#define LOTTES_CRT                  0      //# Timothy Lottes CRT emulation effect. Similar to scanlines, but with more control options. Ported by request.
+#define SCANLINES                   0      //# Scanlines to simulate the look of a CRT TV. Typically suited to sprite games. Note: Works best at Native Res.
+#define VIGNETTE                    0      //# Darkens the edges of the screen, to make it look more like it was shot with a camera lens.
+#define DEBANDING                   0      //# Applies a debanding effect. This effect can help to minimize banding artifacts. Mileage will vary per game.
+#define SP_DITHERING                0      //# Subpixel Dithering to simulate more colors than your monitor can display. Smoothes gradiants, this can reduce color banding.
+#define PX_BORDER                   0      //# Creates a pixel border as a workaround for the bright, or flickering edges that can occur on some games. (Ported by request from SFX).
+
+/*------------------------------------------------------------------------------
+                          [EFFECT CONFIG OPTIONS]
+------------------------------------------------------------------------------*/
+
+//##[FXAA]
+#define FxaaSubpixMax 1.50                 //[0.50 to 4.00] Amount of subpixel anti-aliasing. Higher values for a stronger effect, & edge coverage.
+#define FxaaQuality 4                      //[1|2|3|4] Overall Fxaa quality preset (pixel coverage). 1: Low, 2: Medium, 3: High, 4: Ultra.
+#define BilateralCoverage 0                //[0 or 1] Use Bilateral filtering within the FXAA coverage. Can have a pretty high performance cost if BilateralRadius is high. 
+
+//##[NFAA]
+#define NormalStrength 1.50                //[0.50 to 4.00] Strength of the Normal Filter. Raising this will increase the strength of the filter.
+#define NormalWidth 0.80                   //[0.10 to 2.00] Width of the Normal Filter edge detection. This can be altered depending on the edge detection method used.
+#define EdgeDetection 2                    //[1 or 2] 1 Uses color detection(more raw coverage, less accuracy). 2uses luma edge detection(less raw coverage, more accuracy).
+#define ShowEdges 0                        //[0 or 1] Shows the edge detection. Can be useful for fine tuning, or such.
+
+//##[SSAA]
+#define FilterWidth 1.00                   //[0.50 to 2.00] Width of the SSAA filter. Raising this will increase the width of the edge filter. 
+
+//##[BILINEAR_FILTERING]
+#define FilterStrength 1.00                //[0.10 to 1.50] Bilinear filtering strength. Controls the overall strength of the filtering.
+#define OffsetAmount 0.0                   //[0.0 to 1.5] Pixel offset amount. If you want to use an st offset, 0.5 is generally recommended. 0.0 is off.
+
+//##[BICUBIC_FILTERING]
+#define Interpolation Triangular           //[CatMullRom, Bell, BSpline, Triangular, Cubic] Type of interpolation to use. From left to right is lighter<-->stronger filtering.
+#define BicubicStrength 0.75               //[0.10 to 1.50] Bicubic filtering strength. Controls the overall strength of the filtering.
+#define PixelOffset 0.0                    //[0.0 to 1.5] Pixel offset amount. If you want to use an st offset, 0.5 is generally recommended. 0.0 is off.
+
+//##[GAUSSIAN_FILTERING]
+#define FilterAmount 1.00                  //[0.10 to 1.50] Gaussian filtering strength. Controls the overall strength of the filtering.
+#define GaussianSpread 0.75                //[0.50 to 4.00] The filtering spread & offset levels. Controls the sampling spread of the filtering.
+
+//##[BILATERAL_FILTERING]
+#define BilateralRadius 3.00               //[1.00 to 8.00] Radius of the filter. Increasing the radius leads to more pixel lookups, so higher values require more performance.
+#define BilateralWeight 0.15               //[0.10 to 1.00] Central weight of the filter. Raising this increases the overall filter width, along with the strength.
+
+//##[BLENDED_BLOOM]
+#define BloomType BlendGlow                //[BlendGlow, BlendAddGlow, BlendAddLight, BlendScreen, BlendLuma, BlendOverlay] The type of blended bloom. Light<->Dark.
+#define BloomStrength 0.200                //[0.000 to 1.000] Overall strength of the bloom. You may want to readjust for each blend type.
+#define BlendStrength 1.000                //[0.000 to 1.000] Strength of the blending. This is a modifier based on bloom. 1.0 equates to 100% strength.
+#define BloomDefocus 2.000                 //[1.000 to 4.000] The initial bloom defocus value. Increases the softness of light, bright objects, etc.
+#define BloomWidth 3.200                   //[1.000 to 8.000] Width of the bloom. Adjusts the width of the spread and soft glow. Scales with BloomStrength.
+#define BloomReds 0.040                    //[0.000 to 1.000] Red channel correction of the bloom. Raising will increase the bloom of reds.
+#define BloomGreens 0.030                  //[0.000 to 1.000] Green channel correction of the bloom. Raising will increase the bloom of greens.
+#define BloomBlues 0.020                   //[0.000 to 1.000] Blue channel correction of the bloom. Raising will increase the bloom of blues.
+
+//##[SCENE_TONEMAPPING]
+#define TonemapType 1                      //[0|1|2|3] The base tone mapping operator. 0 is LDR, 1 is HDR(original), 2 & 3 are Filmic HDR(slight grading).
+#define TonemapMask 0                      //[0 or 1] Enables an ALU tone masking curve. Produces a nice cinematic look. Suits some games more than others.
+#define MaskStrength 0.10                  //[0.000 to 1.000] Strength of the tone masking. Higher for a stronger effect. This is a dependency of TonemapMask.
+#define ToneAmount 0.350                   //[0.050 to 1.000] Tonemap strength (tone correction). Higher for stronger tone mapping, lower for lighter.
+#define BlackLevels 0.060                  //[0.000 to 1.000] Black level balance (shadow correction). Increase to deepen blacks, lower to lighten them.
+#define Exposure 1.000                     //[0.100 to 2.000] White correction (brightness). Higher values for more scene exposure, lower for less.
+#define Luminance 1.000                    //[0.100 to 2.000] Luminance average (luminance correction). Higher values will lower scene luminance average.
+#define WhitePoint 1.000                   //[0.100 to 2.000] Whitepoint average (wp lum correction). Higher values will lower the maximum scene white point.
+
+//##[COLOR_CORRECTION]
+#define CorrectionPalette 1                //[1|2|3|4|5] The colorspace palette type. 1: RGB, 2: YXY, 3: XYZ, 4: HSV, 5: YUV. Each one will produce a different combination of shades & hues.
+#define ChannelR 1.40                      //[0.00 to 8.00] R(1), Y(2), X(3), H(4), Y(5) component channel varies with the colorspace used. Higher values increase correction strength.
+#define ChannelG 1.60                      //[0.00 to 8.00] G(1), X(2), Y(3), S(4), U(5) component channel varies with the colorspace used. Higher values increase correction strength.
+#define ChannelB 1.80                      //[0.00 to 8.00] B(1), Y(2), Z(3), V(4), V(5) component channel varies with the colorspace used. Higher values increase correction strength.
+#define PaletteStrength 2.00               //[0.00 to 4.00] The interpolated strength ratio between the base color, and the corrected color. Raise to increase saturation.
+
+//##[CROSS_PROCESSING]
+#define FilmicProcess 1                    //[1|2|3] The color conversion type for the cross process. 1: cool, 2: warm, 3: dusk. You can achieve different results with each.
+#define RedShift 0.50                      //[0.10 to 1.00] Red color component shift of the filmic processing. Alters the red balance of the shift.
+#define GreenShift 0.50                    //[0.10 to 1.00] Green color component shift of the filmic processing. Alters the green balance of the shift.
+#define BlueShift 0.50                     //[0.10 to 1.00] Blue color component shift of the filmic processing. Alters the blue balance of the shift.
+#define ShiftRatio 0.50                    //[0.10 to 2.00] The blending ratio for the base color and the color shift. Higher for a stronger effect. 
+
+//##[TEXTURE_SHARPEN]
+#define SharpenStrength 0.50               //[0.10 to 2.00] Strength of the texture sharpening effect. This is the maximum strength that will be used.
+#define SharpenClamp 0.015                 //[0.005 to 0.500] Reduces the clamping/limiting on the maximum amount of sharpening each pixel recieves. Raise this to reduce the clamping.
+#define SharpenBias 1.00                   //[0.50 to 4.00] Sharpening edge bias. Lower values for clean subtle sharpen, and higher values for a deeper textured sharpen.
+#define DebugSharpen 0                     //[0 or 1] Visualize the sharpening effect. Useful for fine-tuning. Best to disable other effects, to see edge detection clearly.
+
+//##[PIXEL_VIBRANCE]
+#define Vibrance 0.10                      //[-1.00 to 1.00] Overall vibrance strength. Locally adjusts the vibrance of pixels depending on their original saturation.
+#define RedVibrance 1.00                   //[-8.00 to 8.00] Red channel coefficient of the vibrance strength. Adjusting the vibrance of the red channel independently.
+#define GreenVibrance 1.00                 //[-8.00 to 8.00] Green channel coefficient of the vibrance strength. Adjusting the vibrance of the green channel independently.
+#define BlueVibrance 1.00                  //[-8.00 to 8.00] Blue channel coefficient of the vibrance strength. Adjusting the vibrance of the blue channel independently.
+
+//##[COLOR_GRADING]
+#define RedGrading 1.20                    //[0.00 to 3.00] Red colour grading coefficient. Adjust to influence the red channel coefficients of the grading, and highlight tones.
+#define GreenGrading 1.10                  //[0.00 to 3.00] Green colour grading coefficient. Adjust to influence the Green channel coefficients of the grading, and highlight tones.
+#define BlueGrading 1.10                   //[0.00 to 3.00] Blue colour grading coefficient. Adjust to influence the Blue channel coefficients of the grading, and highlight tones.
+#define GradingStrength 0.25               //[0.00 to 1.00] The overall max strength of the colour grading effect. Raise to increase, lower to decrease the amount.
+#define Correlation 1.00                   //[0.10 to 1.00] Correlation between the base colour, and the grading influence. Lower = more of the scene is graded, Higher = less of the scene is graded.
+
+//##[CEL_SHADING]
+#define CelStrength 1.00                   //[0.00 to 4.00] Overall strength of the cel edge outline effect. Affects the overall density.  0.00: no outlines.
+#define EdgeFilter 1.00                    //[0.10 to 2.00] Filters out fainter cel edges. Use it for balancing the cel edge density. Lower values for a more dense cel detection.
+#define EdgeScale 1.50                     //[1.00 to 4.00] Thickness of the cel edges. Basically a scale modifier for the resolution. Set higher when using low/native res for games.
+#define ColorRange 7.00                    //[5.00 to 15.0] This alters the color highlight range of the cel shading. Lower values reduce the range, and higher increases it.
+#define Saturation 1.20                    //[0.10 to 2.00] Highlighted saturation of the shaded color. Where 1.0 is base saturation. Higher for more.
+#define ShadedStrength 0.60                //[0.00 to 1.00] The interpolated strength value of the 'tooning' shading color conversions. Where 1.00 is 100% strength.
+#define UseYuvLuma 0                       //[0 or 1] Uses YUV luma calculations, or base color luma calculations. Yuv luma can produce a better shaded look. 
+#define ColorRounding 0                    //[0 or 1] Uses rounding methods on colors. This can emphasise shaded toon colors. Looks good in some games, and odd in others.
+#define RoundingLevels 9.0                 //[2.0 to 18.0] Alters the rounding levels for the shaded RGB color. Different values will produce different roundin results.
+
+//##[PAINT_SHADING]
+#define PaintRadius 4                      //[2 to 8] Radius of the painted effect. Increasing the radius also requires longer loops, so higher values require more performance.
+#define PaintStrength 1.00                 //[0.00 to 1.00] The overall interpolated strength of the paint effect. Where 1.0 equates to 100% strength.
+#define ResScale 1.00                      //[1.00 to 4.00] Scale modifier for the effect resolution. Set higher to clean up the effect when using on low/native res for games.
+#define UseCelEdges 1                      //[0 or 1] Enables cel edges for the paint shading. This can produce a nice story book / painted cel shader effect. (use cel options)
+
+//##[CURVE_CONTRAST]
+#define CurveType 0                        //[0|1|2] Choose what to apply contrast to. 0 = Luma, 1 = Chroma, 2 = both Luma and Chroma. Default is 0 (Luma)
+#define CurvesContrast 0.35                //[0.00 to 2.00] The amount of contrast you want. Controls the overall strength of the texture sharpening.
+
+//##[GAMMA_CORRECTION]
+#define Gamma 2.20                         //[1.5 to 4.0] Gamma correction. Decrease for lower gamma(darker). Increase for higher gamma(brighter). (Default: 2.2)
+
+//##[LOTTES_CRT]
+#define UseShadowMask 1                    //[0 or 1] Enables, or disables the use of the CRT shadow mask. 0 is disabled, 1 is enabled.
+#define MaskingType 3                      //[1|2|3|4] The type of CRT shadow masking used. 1: compressed TV style, 2: Aperture-grille, 3: Stretched VGA style, 4: VGA style.
+#define CRTSizeX 640.0                     //[128 to 2048] A workaround for arbitrary render target scaling. Either set it to a fixed width, or set it to screenSize.x
+#define CRTSizeY 480.0                     //[128 to 2048] A workaround for arbitrary render target scaling. Either set it to a fixed height, or set it to screenSize.y
+#define ScanBrightness -8.00               //[-16.0 to 1.0] The overall brightness of the scanline effect. Lower for darker, higher for brighter.
+#define FilterCRTAmount -2.00              //[-4.0 to 1.0] The amount of filtering used, to replicate the TV CRT look. Lower for less, higher for more.
+#define HorizontalWarp 0.00                //[0.0 to 0.1] The distortion warping effect for the horizontal (x) axis of the screen. Use small increments.
+#define VerticalWarp 0.00                  //[0.0 to 0.1] The distortion warping effect for the verticle (y) axis of the screen. Use small increments.
+#define MaskAmountDark 1.00                //[0.0 to 1.0] The value of the dark masking line effect used. Lower for darker lower end masking, higher for brighter.
+#define MaskAmountLight 1.40               //[0.0 to 2.0] The value of the light masking line effect used. Lower for darker higher end masking, higher for brighter.
+#define ResolutionScale 1.00               //[0.1 to 4.0] The scale of the image resolution. Lowering this can give off a nice retro TV look. Raising it can clear up the image.
+#define MaskResolutionScale 1.00           //[0.1 to 2.0] The scale of the CRT mask resolution. Use this for balancing the scanline mask scale for difference resolution scaling.
+
+//##[SCANLINES]
+#define ScanlineType 0                     //[0|1|2] The type & orientation of the scanlines. 0 is x(horizontal), 1 is y(vertical), 2 is both(xy)
+#define ScanlineScale 0.50                 //[0.20 to 2.00] The scaling & thickness of the scanlines. Changing this can help with PCSX2 IR scaling problems.
+#define ScanlineIntensity 0.18             //[0.10 to 1.00] The intensity of the scanlines. Defaults: 0.18 for ScanlineType 0|1|2, 0.50 for ScanlineType 3.
+#define ScanlineBrightness 1.02            //[0.50 to 2.00] The brightness of the scanlines.  Defaults: 2.00 for ScanlineType 0|1|2, 1.50 for ScanlineType 3.
+
+//##[VIGNETTE]
+#define VignetteRatio 1.77                 //[0.15 to 6.00] Sets the espect ratio of the vignette. 1.77 for 16:9, 1.60 for 16:10, 1.33 for 4:3, 1.00 for 1:1.
+#define VignetteRadius 1.10                //[0.50 to 3.00] Radius of the vignette effect. Lower values for stronger radial effect from center
+#define VignetteAmount 0.25                //[0.00 to 1.00] Strength of black edge occlusion. Increase for higher strength, decrease for lower.
+#define VignetteSlope 12                   //[2|4|8|10|12|16] How far away from the center the vignetting will start.
+
+//##[DEBANDING]
+#define DebandRadius 32.0                  //[0.0 to 1024.0] Sampling radius, higher values will reduce further banding but might also reduce details.
+#define DebandThreshold 0.017              //[0.000 to 0.100] Threshold, higher values will reduce further banding but might also reduce details and increase noise.
+#define DebandSampleCount 4                //[1 to 8] Sample count, higher values are better. But also have a higher performance cost.
+#define DebandOffsetMode 3                 //[1|2|3] 1 = cross (axis aligned, fast), 2 = diagonal (45 degrees, slower), 3 = box (fully random, slower).
+#define DebandDithering 3                  //[0|1|2|3] Additional dithering options to smoothen the output. 0 = No dithering 1 = Ordered dithering, 2 = Random dithering, 3 = Iestyn's RGB dither (Valve).
+
+//##[SUBPIXEL_DITHERING]
+#define DitherMethod 2                     //[1 or 2] The type of dithering to use. 1: Ordered grid dithering(faster), 2: random dithering(higher quality). 
+#define ShowMethod 0                       //[0 or 1] Shows the dithering method, based of the type of dithering selected. Useful for debugging, and confirmation of working order.
+
+//##[PX_BORDER]
+#define BorderWidth float2(2, 2)           //[0 to 2048, 0 to 2048] (X,Y)-width of the border. Measured in pixels.
+#define BorderColor float3(0, 0, 0)        //[0 to 255, 0 to 255, 0 to 255] What color the border should be. In integer RGB colors, meaning 0,0,0 is black and 255,255,255 is full white.
+
+//[END OF USER OPTIONS]
+
+/*------------------------------------------------------------------------------
+                             [GLOBALS|FUNCTIONS]
+------------------------------------------------------------------------------*/
+
+// HLSL --> GLSL
+#define int2 ivec2
+#define float2 vec2
+#define float3 vec3
+#define float4 vec4
+#define float4x4 mat4
+#define float3x3 mat3
+#define float4x3 mat4x3
+#define static
+#define fmod mod
+#define frac fract
+#define mul(x, y) (y * x)
+#define lerp(x,y,s) mix(x,y,s)
+#define saturate(x) clamp(x, 0.0, 1.0)
+#define SamplerState sampler2D
+
+//OGL2 Uniforms
+uniform vec4 OGL2Param;
+uniform vec4 OGL2Size;
+uniform vec4 OGL2InvSize;
+uniform sampler2D OGL2Texture;
+
+//VS --> PS
+in vec2 TexCoord;
+in vec3 Vertex;
+in vec3 Normal;
+in vec4 rcpPos;
+in vec4 Position;
+in vec3 halfVector;
+
+//PS --> Output
+out vec4 FragColor;
+
+//Static vars
+float Epsilon = 1e-10;
+float2 screenSize = OGL2Size.xy;
+float2 pixelSize = OGL2InvSize.xy;
+float4 rcpFrame = float4(-0.50/OGL2Size.x, -0.50/OGL2Size.y, 0.50/OGL2Size.x, 0.50/OGL2Size.y);
+float4 rcpByTwo = float4(-2.00/OGL2Size.x, -2.00/OGL2Size.y, 2.00/OGL2Size.x, 2.00/OGL2Size.y);
+
+//Conversion matrices
+float3 RGBtoXYZ(float3 rgb)
+{
+    const float3x3 m = float3x3(
+    0.4124564, 0.3575761, 0.1804375,
+    0.2126729, 0.7151522, 0.0721750,
+    0.0193339, 0.1191920, 0.9503041);
+
+    return mul(m, rgb);
+}
+
+float3 XYZtoRGB(float3 xyz)
+{
+    const float3x3 m = float3x3(
+    3.2404542,-1.5371385,-0.4985314,
+   -0.9692660, 1.8760108, 0.0415560,
+    0.0556434,-0.2040259, 1.0572252);
+
+    return mul(m, xyz);
+}
+
+float3 RGBtoYUV(float3 RGB)
+{
+    const float3x3 m = float3x3(
+    0.2126, 0.7152, 0.0722,
+   -0.09991,-0.33609, 0.436,
+    0.615, -0.55861, -0.05639);
+
+    return mul(m, RGB);
+}
+
+float3 YUVtoRGB(float3 YUV)
+{
+    const float3x3 m = float3x3(
+    1.000, 0.000, 1.28033,
+    1.000,-0.21482,-0.38059,
+    1.000, 2.12798, 0.000);
+
+    return mul(m, YUV);
+}
+
+float3 XYZtoYxy(float3 xyz)
+{
+    float w = (xyz.r + xyz.g + xyz.b);
+    float3 Yxy;
+
+    Yxy.r = xyz.g;
+    Yxy.g = xyz.r / w;
+    Yxy.b = xyz.g / w;
+
+    return Yxy;
+}
+
+float3 YxytoXYZ(float3 Yxy)
+{
+    float3 xyz;
+    xyz.g = Yxy.r;
+    xyz.r = Yxy.r * Yxy.g / Yxy.b;
+    xyz.b = Yxy.r * (1.0 - Yxy.g - Yxy.b) / Yxy.b;
+
+    return xyz;
+}
+
+//Average relative luminance
+const float3 lumCoeff = float3(0.2126729, 0.7151522, 0.0721750);
+float AvgLuminance(float3 color)
+{
+    return sqrt(dot(color * color, lumCoeff));
+}
+
+//Smoothtep alt
+float smootherstep(float a, float b, float x)
+{
+    x = saturate((x - a) / (b - a));
+    return x*x*x*(x*(x * 6 - 15) + 10);
+}
+
+//check for OOB rgb clipping
+float4 DebugClipping(float4 color)
+{
+    if (color.x >= 0.99999 && color.y >= 0.99999 &&
+    color.z >= 0.99999) color.xyz = float3(1.0f, 0.0f, 0.0f);
+
+    if (color.x <= 0.00001 && color.y <= 0.00001 &&
+    color.z <= 0.00001) color.xyz = float3(0.0f, 0.0f, 1.0f);
+
+    return color;
+}
+
+float4 sampleTex(sampler2D texSample, float2 texcoord)
+{
+    return texture(texSample, texcoord);
+}
+
+float4 sampleTexLod(sampler2D texSample, float2 texcoord, float lod)
+{
+    return textureLod(texSample, texcoord, lod);
+}
+
+/*------------------------------------------------------------------------------
+                             [NFAA CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if NFAA == 1
+float filterStrength = NormalStrength;
+float filterSpread = NormalWidth;
+
+int useColor = EdgeDetection;
+int debug = ShowEdges;
+
+vec2 findContrastByLuminance(sampler2D colorSampler, vec2 texcoord) 
+{
+    // Normal offsets, scale by filter spread
+    vec2 upOffset = vec2(0.0, pixelSize.y) * filterSpread;
+    vec2 rightOffset = vec2(pixelSize.x, 0.0) * filterSpread;
+
+    float topHeight         = AvgLuminance( texture( colorSampler, texcoord + upOffset              ).rgb );
+    float bottomHeight      = AvgLuminance( texture( colorSampler, texcoord - upOffset              ).rgb );
+    float rightHeight       = AvgLuminance( texture( colorSampler, texcoord + rightOffset           ).rgb );
+    float leftHeight        = AvgLuminance( texture( colorSampler, texcoord - rightOffset           ).rgb );
+    float leftTopHeight     = AvgLuminance( texture( colorSampler, texcoord - rightOffset + upOffset).rgb );
+    float leftBottomHeight  = AvgLuminance( texture( colorSampler, texcoord - rightOffset - upOffset).rgb );
+    float rightBottomHeight = AvgLuminance( texture( colorSampler, texcoord + rightOffset + upOffset).rgb );
+    float rightTopHeight    = AvgLuminance( texture( colorSampler, texcoord + rightOffset - upOffset).rgb );
+
+    // Normal map creation
+    float sum0 = rightTopHeight    + bottomHeight + leftTopHeight;
+    float sum1 = leftBottomHeight  + topHeight    + rightBottomHeight;
+    float sum2 = leftTopHeight     + rightHeight  + leftBottomHeight;
+    float sum3 = rightBottomHeight + leftHeight   + rightTopHeight;
+
+    // Subtract the opposite sample set for final vectors
+    float vector1 = (sum0 - sum1) * filterStrength;
+    float vector2 = (sum3 - sum2) * filterStrength;
+
+    vec2 Vectors = vec2(vector1, vector2);
+
+    return Vectors;
+}
+
+vec2 findContrastByColor(sampler2D colorSampler, vec2 texcoord)
+{
+    // Normal offsets, scale by filter spread
+    vec2 upOffset = vec2( 0, pixelSize.y ) * filterSpread;
+    vec2 rightOffset = vec2( pixelSize.x, 0 ) * filterSpread;
+
+    vec3 topHeight         = texture( colorSampler, texcoord + upOffset              ).rgb;
+    vec3 bottomHeight      = texture( colorSampler, texcoord - upOffset              ).rgb;
+    vec3 rightHeight       = texture( colorSampler, texcoord + rightOffset           ).rgb;
+    vec3 leftHeight        = texture( colorSampler, texcoord - rightOffset           ).rgb;
+    vec3 leftTopHeight     = texture( colorSampler, texcoord - rightOffset + upOffset).rgb;
+    vec3 leftBottomHeight  = texture( colorSampler, texcoord - rightOffset - upOffset).rgb;
+    vec3 rightBottomHeight = texture( colorSampler, texcoord + rightOffset + upOffset).rgb;
+    vec3 rightTopHeight    = texture( colorSampler, texcoord + rightOffset - upOffset).rgb;
+
+    // Normal map creation
+    vec3 sum0 = rightTopHeight    + bottomHeight + leftTopHeight;
+    vec3 sum1 = leftBottomHeight  + topHeight    + rightBottomHeight;
+    vec3 sum2 = leftTopHeight     + rightHeight  + leftBottomHeight;
+    vec3 sum3 = rightBottomHeight + leftHeight   + rightTopHeight;
+
+    // Subtract the opposite sample set for final vectors
+    float vector1 = length(sum0 - sum1) * filterStrength;
+    float vector2 = length(sum3 - sum2) * filterStrength;
+
+    vec2 Vectors = vec2(vector1, vector2);
+
+    return Vectors;
+}
+
+vec4 NFAAPass(vec4 color, vec2 texcoord) 
+{
+    vec2 Vectors;
+    filterStrength += (filterSpread/2);
+
+    if (useColor == 1)
+    { 
+        Vectors = findContrastByColor(OGL2Texture, texcoord.xy);
+    }
+    else
+    {
+        Vectors = findContrastByLuminance(OGL2Texture, texcoord.xy);
+    }
+
+    float filterClamp = filterStrength/filterSpread;
+
+    Vectors.xy = clamp(Vectors, -vec2(filterClamp,filterClamp), vec2(filterClamp,filterClamp));
+
+    vec2 Normal = vec2(Vectors.x, Vectors.y) * pixelSize;
+
+    vec4 Scene0 = texture(OGL2Texture, texcoord.xy, 0.0);
+    vec4 Scene1 = texture(OGL2Texture, texcoord.xy + Normal.xy, 0.0);
+    vec4 Scene2 = texture(OGL2Texture, texcoord.xy - Normal.xy, 0.0);
+    vec4 Scene3 = texture(OGL2Texture, texcoord.xy + vec2(Normal.x, -Normal.y), 0.0);
+    vec4 Scene4 = texture(OGL2Texture, texcoord.xy - vec2(Normal.x, -Normal.y), 0.0);
+    
+    color = (Scene0 + Scene1 + Scene2 + Scene3 + Scene4) / 5.0;
+
+    // Debug Output
+    if (debug == 1) 
+    {
+        color .xyz = normalize(vec3(Vectors.x, Vectors.y, 1.0) * 0.5 + 0.5);
+    }
+
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                             [SSAA CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if SSAA == 1
+vec4 SSAAPass(vec4 color, vec2 texcoord) 
+{
+    float t, l, r, b;
+    vec2 w = vec2(FilterWidth) * pixelSize;
+    
+    t = AvgLuminance(texture(OGL2Texture, texcoord + vec2(0.0,-1.0) * w, 0.0).xyz),
+    l = AvgLuminance(texture(OGL2Texture, texcoord + vec2(-1.0,0.0) * w, 0.0).xyz),
+    r = AvgLuminance(texture(OGL2Texture, texcoord + vec2(1.0, 0.0) * w, 0.0).xyz),
+    b = AvgLuminance(texture(OGL2Texture, texcoord + vec2(0.0, 1.0) * w, 0.0).xyz);
+
+    vec2 n = vec2(-(t - b), r - l);
+
+    float nl = length(n);
+
+    if	(nl < (1.0 / 16.0))
+        return texture(OGL2Texture, texcoord, 0.0);
+
+    else
+    {
+        n *= pixelSize / nl;
+
+        vec4 o = texture(OGL2Texture, texcoord, 0.0),
+        t0 = texture(OGL2Texture, texcoord + n * 0.5, 0.0) * 0.9,
+        t1 = texture(OGL2Texture, texcoord - n * 0.5, 0.0) * 0.9,
+        t2 = texture(OGL2Texture, texcoord + n, 0.0) * 0.75,
+        t3 = texture(OGL2Texture, texcoord - n, 0.0) * 0.75; 
+     
+        color = (o + t0 + t1 + t2 + t3) / 4.3;
+
+        return color;
+    }
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                        [TEXTURE FILTERING FUNCTIONS]
+------------------------------------------------------------------------------*/
+
+float BSpline(float x)
+{
+    float f = x;
+
+    if (f < 0.0)
+    {
+        f = -f;
+    }
+    if (f >= 0.0 && f <= 1.0)
+    {
+        return (2.0 / 3.0) + (0.5) * (f* f * f) - (f*f);
+    }
+    else if (f > 1.0 && f <= 2.0)
+    {
+        return 1.0 / 6.0 * pow((2.0 - f), 3.0);
+    }
+    return 1.0;
+}
+
+float CatMullRom(float x)
+{
+    float b = 0.0;
+    float c = 0.5;
+    float f = x;
+
+    if (f < 0.0)
+    {
+        f = -f;
+    }
+    if (f < 1.0)
+    {
+        return ((12.0 - 9.0 * b - 6.0 * c) *
+                (f * f * f) + (-18.0 + 12.0 * b + 6.0 * c) *
+                (f * f) + (6.0 - 2.0 * b)) / 6.0;
+    }
+    else if (f >= 1.0 && f < 2.0)
+    {
+        return ((-b - 6.0 * c) * (f * f * f) +
+                (6.0 * b + 30.0 * c) *(f *f) +
+                (-(12.0 * b) - 48.0 * c) * f +
+                8.0 * b + 24.0 * c) / 6.0;
+    }
+    else
+    {
+        return 0.0;
+    }
+}
+
+float Bell(float x)
+{
+    float f = (x / 2.0) * 1.5;
+
+    if (f > -1.5 && f < -0.5)
+    {
+        return(0.5 * pow(f + 1.5, 2.0));
+    }
+    else if (f > -0.5 && f < 0.5)
+    {
+        return 3.0 / 4.0 - (f * f);
+    }
+    else if ((f > 0.5 && f < 1.5))
+    {
+        return(0.5 * pow(f - 1.5, 2.0));
+    }
+    return 0.0;
+}
+
+float Triangular(float x)
+{
+    x = x / 2.0;
+
+    if (x < 0.0)
+    {
+        return (x + 1.0);
+    }
+    else
+    {
+        return (1.0 - x);
+    }
+    return 0.0;
+}
+
+float Cubic(float coeff)
+{
+    float4 n = float4(1.0, 2.0, 3.0, 4.0) - coeff;
+    float4 s = n * n * n;
+
+    float x = s.x;
+    float y = s.y - 4.0 * s.x;
+    float z = s.z - 4.0 * s.y + 6.0 * s.x;
+    float w = 6.0 - x - y - z;
+
+    return (x + y + z + w) / 4.0;
+}
+
+/*------------------------------------------------------------------------------
+                       [BILINEAR FILTERING CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if BILINEAR_FILTERING == 1
+float4 SampleBiLinear(sampler2D texSample, float2 texcoord)
+{
+    float texelSizeX = pixelSize.x;
+    float texelSizeY = pixelSize.y;
+
+    int nX = int(texcoord.x * screenSize.x);
+    int nY = int(texcoord.y * screenSize.y);
+
+    float2 uvCoord = float2((float(nX) + OffsetAmount) / screenSize.x, (float(nY) + OffsetAmount) / screenSize.y);
+
+    // Take nearest two data in current row.
+    float4 SampleA = sampleTex(texSample, uvCoord);
+    float4 SampleB = sampleTex(texSample, uvCoord + float2(texelSizeX, 0.0));
+
+    // Take nearest two data in bottom row.
+    float4 SampleC = sampleTex(texSample, uvCoord + float2(0.0, texelSizeY));
+    float4 SampleD = sampleTex(texSample, uvCoord + float2(texelSizeX, texelSizeY));
+
+    float LX = frac(texcoord.x * screenSize.x); //Get Interpolation factor for X direction.
+
+    // Interpolate in X direction.
+    float4 InterpolateA = lerp(SampleA, SampleB, LX); //Top row in X direction.
+    float4 InterpolateB = lerp(SampleC, SampleD, LX); //Bottom row in X direction.
+
+    float LY = frac(texcoord.y * screenSize.y); //Get Interpolation factor for Y direction.
+
+    return lerp(InterpolateA, InterpolateB, LY); //Interpolate in Y direction.
+}
+
+float4 BiLinearPass(float4 color, float2 texcoord)
+{
+    float4 bilinear = SampleBiLinear(OGL2Texture, texcoord);
+    color = lerp(color, bilinear, FilterStrength);
+
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                      [BICUBIC FILTERING CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if BICUBIC_FILTERING == 1
+float4 BicubicFilter(sampler2D texSample, float2 texcoord)
+{  
+    float texelSizeX = pixelSize.x;
+    float texelSizeY = pixelSize.y;
+
+    float4 nSum = float4(0.0, 0.0, 0.0, 0.0);
+    float4 nDenom = float4(0.0, 0.0, 0.0, 0.0);
+
+    float a = frac(texcoord.x * screenSize.x);
+    float b = frac(texcoord.y * screenSize.y);
+
+    int nX = int(texcoord.x * screenSize.x);
+    int nY = int(texcoord.y * screenSize.y);
+
+    float2 uvCoord = float2(float(nX) / screenSize.x + PixelOffset / screenSize.x,
+    float(nY) / screenSize.y + PixelOffset / screenSize.y);
+
+    for (int m = -1; m <= 2; m++) {
+    for (int n = -1; n <= 2; n++) {
+
+    float4 Samples = sampleTex(texSample, uvCoord +
+    float2(texelSizeX * float(m), texelSizeY * float(n)));
+
+    float vc1 = Interpolation(float(m) - a);
+    float4 vecCoeff1 = float4(vc1, vc1, vc1, vc1);
+
+    float vc2 = Interpolation(-(float(n) - b));
+    float4 vecCoeff2 = float4(vc2, vc2, vc2, vc2);
+
+    nSum = nSum + (Samples * vecCoeff2 * vecCoeff1);
+    nDenom = nDenom + (vecCoeff2 * vecCoeff1); }}
+    return nSum / nDenom;
+}
+
+float4 BiCubicPass(float4 color, float2 texcoord)
+{
+    float4 bicubic = BicubicFilter(OGL2Texture, texcoord);
+    color = lerp(color, bicubic, BicubicStrength);
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                      [GAUSSIAN FILTERING CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if GAUSSIAN_FILTERING == 1
+float4 GaussianPass(float4 color, float2 texcoord)
+{
+    if (screenSize.x < 1024 || screenSize.y < 1024)
+    {
+        pixelSize.x /= 2.0;
+        pixelSize.y /= 2.0;
+    }
+    
+    float2 dx = float2(pixelSize.x * GaussianSpread, 0.0);
+    float2 dy = float2(0.0, pixelSize.y * GaussianSpread);
+
+    float2 dx2 = 2.0 * dx;
+    float2 dy2 = 2.0 * dy;
+
+    float4 gaussian = sampleTex(OGL2Texture, texcoord);
+
+    gaussian += sampleTex(OGL2Texture, texcoord - dx2 + dy2);
+    gaussian += sampleTex(OGL2Texture, texcoord - dx + dy2);
+    gaussian += sampleTex(OGL2Texture, texcoord + dy2);
+    gaussian += sampleTex(OGL2Texture, texcoord + dx + dy2);
+    gaussian += sampleTex(OGL2Texture, texcoord + dx2 + dy2);
+
+    gaussian += sampleTex(OGL2Texture, texcoord - dx2 + dy);
+    gaussian += sampleTex(OGL2Texture, texcoord - dx + dy);
+    gaussian += sampleTex(OGL2Texture, texcoord + dy);
+    gaussian += sampleTex(OGL2Texture, texcoord + dx + dy);
+    gaussian += sampleTex(OGL2Texture, texcoord + dx2 + dy);
+
+    gaussian += sampleTex(OGL2Texture, texcoord - dx2);
+    gaussian += sampleTex(OGL2Texture, texcoord - dx);
+    gaussian += sampleTex(OGL2Texture, texcoord + dx);
+    gaussian += sampleTex(OGL2Texture, texcoord + dx2);
+
+    gaussian += sampleTex(OGL2Texture, texcoord - dx2 - dy);
+    gaussian += sampleTex(OGL2Texture, texcoord - dx - dy);
+    gaussian += sampleTex(OGL2Texture, texcoord - dy);
+    gaussian += sampleTex(OGL2Texture, texcoord + dx - dy);
+    gaussian += sampleTex(OGL2Texture, texcoord + dx2 - dy);
+
+    gaussian += sampleTex(OGL2Texture, texcoord - dx2 - dy2);
+    gaussian += sampleTex(OGL2Texture, texcoord - dx - dy2);
+    gaussian += sampleTex(OGL2Texture, texcoord - dy2);
+    gaussian += sampleTex(OGL2Texture, texcoord + dx - dy2);
+    gaussian += sampleTex(OGL2Texture, texcoord + dx2 - dy2);
+
+    gaussian /= 25.0;
+
+    color = lerp(color, gaussian, FilterAmount);
+
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                      [BILATERAL FILTERING CODE SECTION]
+------------------------------------------------------------------------------*/
+
+// Adapated from LibRetro (Bilateral v1.0 by Sp00kyFox)
+#define CWGHT 0.25 // color weight threshold
+#define TEX(dx, dy) texture(bTex, texcoord + float2(dx, dy) * pixelSize)
+
+float Dist(float3 pt1, float3 pt2)
+{
+    float3 v = pt1 - pt2;
+    return dot(v,v);
+}
+
+float sigma = BilateralRadius * BilateralRadius / 2.0;
+float cwght = 1.0 + CWGHT * max(1.0, 2.87029746 * sigma + 0.43165242 * BilateralRadius - 0.25219746);
+
+float4 Weight(int i, int j, float3 org, float4x3 A)
+{
+    float clr = -BilateralWeight * BilateralWeight;
+
+    float domain[13] = float[](1.0, 
+    exp( -1.0/sigma), exp( -4.0/sigma), exp( -9.0/sigma), exp( -16.0/sigma), exp( -25.0/sigma), exp( -36.0/sigma), 
+    exp(-49.0/sigma), exp(-64.0/sigma), exp(-81.0/sigma), exp(-100.0/sigma), exp(-121.0/sigma), exp(-144.0/sigma));
+
+    float4 weight = domain[i] * domain[j] * exp(
+    float4(Dist(org, A[0]), Dist(org, A[1]), Dist(org, A[2]), Dist(org, A[3])) / clr);
+
+    return weight;
+}
+
+float3 BilateralFilter(sampler2D bTex, float2 texcoord)
+{
+    float4x3 A, B;
+    float norm = cwght;
+
+    float4 WX, WY, V4 = float4(1.0);
+    float3 org = TEX(0.0, 0.0).rgb, result = cwght * org;
+
+    float steps = ceil(BilateralRadius);
+
+    for(int x = 1; x <= steps; x++)
+    {	
+        A = float4x3(TEX( x, 0).rgb, TEX(-x, 0).rgb, TEX( 0, x).rgb, TEX( 0,-x).rgb);
+        B = float4x3(TEX( x, x).rgb, TEX( x,-x).rgb, TEX(-x, x).rgb, TEX(-x,-x).rgb);
+
+        WX = Weight(x, 0, org, A); WY = Weight(x, x, org, B);	
+
+        result += mul(WX, A) + mul(WY, B);
+        norm += dot(WX, V4) + dot(WY, V4);
+
+        for(int y = 1; y < x; y++)
+        {			
+            A = float4x3(TEX( x, y).rgb, TEX( x,-y).rgb, TEX(-x, y).rgb, TEX(-x,-y).rgb);
+            B = float4x3(TEX( y, x).rgb, TEX( y,-x).rgb, TEX(-y, x).rgb, TEX(-y,-x).rgb);
+
+            WX = Weight(x, y, org, A); WY = Weight(y, x, org, B);	
+
+            result += mul(WX, A) + mul(WY, B);
+            norm += dot(WX, V4) + dot(WY, V4);
+        }
+    }
+
+    return result/norm;
+}
+
+#if BILATERAL_FILTERING == 1
+float4 BilateralPass(float4 color, float2 texcoord)
+{
+    color.rgb = BilateralFilter(OGL2Texture, texcoord);
+    color.a = AvgLuminance(color.rgb);
+    
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                             [FXAA CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if FXAA == 1
+#if FxaaQuality == 4
+#define FxaaEdgeThreshold 0.063
+#define FxaaEdgeThresholdMin 0.000
+#elif FxaaQuality == 3
+#define FxaaEdgeThreshold 0.125
+#define FxaaEdgeThresholdMin 0.0312
+#elif FxaaQuality == 2
+#define FxaaEdgeThreshold 0.166
+#define FxaaEdgeThresholdMin 0.0625
+#elif FxaaQuality == 1
+#define FxaaEdgeThreshold 0.250
+#define FxaaEdgeThresholdMin 0.0833
+#endif
+
+const float FXAA_SPAN_MAX = FxaaSubpixMax;
+const float FXAA_REDUCE_MUL = FxaaEdgeThreshold;
+const float FXAA_REDUCE_MIN = FxaaEdgeThresholdMin;
+
+vec3 FxaaPixelShader(vec2 uv, vec4 uvPos, sampler2D tex, vec2 rcpFrame)
+{
+    vec3 rgbNW = textureLod(tex, uvPos.zw, 0.0).xyz;
+    vec3 rgbNE = textureLodOffset(tex, uvPos.zw, 0.0, ivec2(1,0)).xyz;
+    vec3 rgbSW = textureLodOffset(tex, uvPos.zw, 0.0, ivec2(0,1)).xyz;
+    vec3 rgbSE = textureLodOffset(tex, uvPos.zw, 0.0, ivec2(1,1)).xyz;
+    vec3 rgbM  = textureLod(tex, uv.xy, 0.0).xyz;
+
+    float lumaNW = AvgLuminance(rgbNW);
+    float lumaNE = AvgLuminance(rgbNE);
+    float lumaSW = AvgLuminance(rgbSW);
+    float lumaSE = AvgLuminance(rgbSE);
+    float lumaM  = AvgLuminance(rgbM);
+
+    float lumaMin = min(lumaM, min(min(lumaNW, lumaNE), min(lumaSW, lumaSE)));
+    float lumaMax = max(lumaM, max(max(lumaNW, lumaNE), max(lumaSW, lumaSE)));
+
+    vec2 dir;
+    dir.x = -((lumaNW + lumaNE) - (lumaSW + lumaSE));
+    dir.y =  ((lumaNW + lumaSW) - (lumaNE + lumaSE));
+
+    float dirReduce = max((lumaNW + lumaNE + lumaSW + lumaSE) * (0.25 * FXAA_REDUCE_MUL), FXAA_REDUCE_MIN);
+    float rcpDirMin = 1.0/(min(abs(dir.x), abs(dir.y)) + dirReduce);
+    
+    dir = min(vec2( FXAA_SPAN_MAX,  FXAA_SPAN_MAX), max(vec2(-FXAA_SPAN_MAX, -FXAA_SPAN_MAX),
+    dir * rcpDirMin)) * rcpFrame.xy;
+
+    #if BilateralCoverage == 1
+    vec3 rgbA = (1.0/2.0) * (
+        BilateralFilter(tex, uv.xy + dir * (1.0/3.0 - 0.5)).xyz +
+        BilateralFilter(tex, uv.xy + dir * (2.0/3.0 - 0.5)).xyz);
+    #else
+    vec3 rgbA = (1.0/2.0) * (
+        textureLod(tex, uv.xy + dir * (1.0/3.0 - 0.5), 0.0).xyz +
+        textureLod(tex, uv.xy + dir * (2.0/3.0 - 0.5), 0.0).xyz);
+    #endif
+    vec3 rgbB = rgbA * (1.0/2.0) + (1.0/4.0) * (
+        textureLod(tex, uv.xy + dir * (0.0/3.0 - 0.5), 0.0).xyz +
+        textureLod(tex, uv.xy + dir * (3.0/3.0 - 0.5), 0.0).xyz);
+    
+    float lumaB = AvgLuminance(rgbB);
+
+    if((lumaB < lumaMin) || (lumaB > lumaMax)) return rgbA;
+    else return rgbB; 
+}
+
+vec4 FXAAPass(float4 Fxaa, vec2 texcoord)
+{
+    Fxaa.rgb = FxaaPixelShader(texcoord, rcpPos, OGL2Texture, pixelSize);
+    Fxaa.a = AvgLuminance(Fxaa.rgb);
+    
+    return Fxaa;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                         [BICUBIC SCALER CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if BICUBLIC_SCALER == 1
+float4 BicubicScaler(sampler2D tex, float2 uv, float2 texSize)
+{
+    float2 inputSize = float2(1.0/texSize.x, 1.0/texSize.y);
+
+    float2 coord_hg = uv * texSize - 0.5;
+    float2 index = floor(coord_hg);
+    float2 f = coord_hg - index;
+
+    mat4 M = mat4( -1.0, 3.0,-3.0, 1.0, 3.0,-6.0, 3.0, 0.0,
+                   -3.0, 0.0, 3.0, 0.0, 1.0, 4.0, 1.0, 0.0 );
+    M /= 6.0;
+
+    float4 wx = mul(float4(f.x*f.x*f.x, f.x*f.x, f.x, 1.0), M);
+    float4 wy = mul(float4(f.y*f.y*f.y, f.y*f.y, f.y, 1.0), M);
+    float2 w0 = float2(wx.x, wy.x);
+    float2 w1 = float2(wx.y, wy.y);
+    float2 w2 = float2(wx.z, wy.z);
+    float2 w3 = float2(wx.w, wy.w);
+
+    float2 g0 = w0 + w1;
+    float2 g1 = w2 + w3;
+    float2 h0 = w1 / g0 - 1.0;
+    float2 h1 = w3 / g1 + 1.0;
+
+    float2 coord00 = index + h0;
+    float2 coord10 = index + float2(h1.x, h0.y);
+    float2 coord01 = index + float2(h0.x, h1.y);
+    float2 coord11 = index + h1;
+
+    coord00 = (coord00 + 0.5) * inputSize;
+    coord10 = (coord10 + 0.5) * inputSize;
+    coord01 = (coord01 + 0.5) * inputSize;
+    coord11 = (coord11 + 0.5) * inputSize;
+
+    float4 tex00 = sampleTexLod(tex, coord00, 0);
+    float4 tex10 = sampleTexLod(tex, coord10, 0);
+    float4 tex01 = sampleTexLod(tex, coord01, 0);
+    float4 tex11 = sampleTexLod(tex, coord11, 0);
+
+    tex00 = lerp(tex01, tex00, float4(g0.y, g0.y, g0.y, g0.y));
+    tex10 = lerp(tex11, tex10, float4(g0.y, g0.y, g0.y, g0.y));
+
+    float4 res = lerp(tex10, tex00, float4(g0.x, g0.x, g0.x, g0.x));
+
+    return res;
+}
+
+float4 BiCubicScalerPass(float4 color, float2 texcoord)
+{
+    color = BicubicScaler(OGL2Texture, texcoord, screenSize);
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                         [LANCZOS SCALER CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if LANCZOS_SCALER == 1
+float3 PixelPos(float xpos, float ypos)
+{
+    return sampleTex(OGL2Texture, float2(xpos, ypos)).rgb;
+}
+
+float4 WeightQuad(float x)
+{
+    #define FIX(c) max(abs(c), 1e-5);
+    const float PI = 3.1415926535897932384626433832795;
+
+    float4 weight = FIX(PI * float4(1.0 + x, x, 1.0 - x, 2.0 - x));
+    float4 ret = sin(weight) * sin(weight / 2.0) / (weight * weight);
+
+    return ret / dot(ret, float4(1.0, 1.0, 1.0, 1.0));
+}
+
+float3 LineRun(float ypos, float4 xpos, float4 linetaps)
+{
+    return mul(linetaps, float4x3(
+    PixelPos(xpos.x, ypos),
+    PixelPos(xpos.y, ypos),
+    PixelPos(xpos.z, ypos),
+    PixelPos(xpos.w, ypos)));
+}
+
+float4 LanczosScaler(float2 texcoord, float2 inputSize)
+{
+    float2 stepxy = float2(1.0/inputSize.x, 1.0/inputSize.y);
+    float2 pos = texcoord + stepxy;
+    float2 f = frac(pos / stepxy);
+
+    float2 xystart = (-2.0 - f) * stepxy + pos;
+    float4 xpos = float4(xystart.x,
+    xystart.x + stepxy.x,
+    xystart.x + stepxy.x * 2.0,
+    xystart.x + stepxy.x * 3.0);
+
+    float4 linetaps = WeightQuad(f.x);
+    float4 columntaps = WeightQuad(f.y);
+
+    // final sum and weight normalization
+    return float4(mul(columntaps, float4x3(
+    LineRun(xystart.y, xpos, linetaps),
+    LineRun(xystart.y + stepxy.y, xpos, linetaps),
+    LineRun(xystart.y + stepxy.y * 2.0, xpos, linetaps),
+    LineRun(xystart.y + stepxy.y * 3.0, xpos, linetaps))), 1.0);
+}
+
+float4 LanczosScalerPass(float4 color, float2 texcoord)
+{
+    color = LanczosScaler(texcoord, screenSize);
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                       [GAMMA CORRECTION CODE SECTION]
+------------------------------------------------------------------------------*/
+
+float3 EncodeGamma(float3 color, float gamma)
+{
+    color = saturate(color);
+    color.r = (color.r <= 0.0404482362771082) ?
+    color.r / 12.92 : pow((color.r + 0.055) / 1.055, gamma);
+    color.g = (color.g <= 0.0404482362771082) ?
+    color.g / 12.92 : pow((color.g + 0.055) / 1.055, gamma);
+    color.b = (color.b <= 0.0404482362771082) ?
+    color.b / 12.92 : pow((color.b + 0.055) / 1.055, gamma);
+
+    return color;
+}
+
+float3 DecodeGamma(float3 color, float gamma)
+{
+    color = saturate(color);
+    color.r = (color.r <= 0.00313066844250063) ?
+    color.r * 12.92 : 1.055 * pow(color.r, 1.0 / gamma) - 0.055;
+    color.g = (color.g <= 0.00313066844250063) ?
+    color.g * 12.92 : 1.055 * pow(color.g, 1.0 / gamma) - 0.055;
+    color.b = (color.b <= 0.00313066844250063) ?
+    color.b * 12.92 : 1.055 * pow(color.b, 1.0 / gamma) - 0.055;
+
+    return color;
+}
+
+#if GAMMA_CORRECTION == 1
+float4 GammaPass(float4 color, float2 texcoord)
+{
+    const float GammaConst = 2.233333;
+    color.rgb = EncodeGamma(color.rgb, GammaConst);
+    color.rgb = DecodeGamma(color.rgb, float(Gamma));
+    color.a = AvgLuminance(color.rgb);
+
+    return color;
+}
+#endif
+/*------------------------------------------------------------------------------
+                       [TEXTURE SHARPEN CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if TEXTURE_SHARPEN == 1
+float4 SampleBicubic(sampler2D texSample, float2 texcoord)
+{
+    float texelSizeX = pixelSize.x * float(SharpenBias);
+    float texelSizeY = pixelSize.y * float(SharpenBias);
+
+    float4 nSum = float4(0.0, 0.0, 0.0, 0.0);
+    float4 nDenom = float4(0.0, 0.0, 0.0, 0.0);
+
+    float a = frac(texcoord.x * screenSize.x);
+    float b = frac(texcoord.y * screenSize.y);
+
+    int nX = int(texcoord.x * screenSize.x);
+    int nY = int(texcoord.y * screenSize.y);
+
+    float2 uvCoord = float2(float(nX) / screenSize.x, float(nY) / screenSize.y);
+
+    for (int m = -1; m <= 2; m++) {
+    for (int n = -1; n <= 2; n++) {
+
+    float4 Samples = sampleTex(texSample, uvCoord +
+    float2(texelSizeX * float(m), texelSizeY * float(n)));
+
+    float vc1 = Cubic(float(m) - a);
+    float4 vecCoeff1 = float4(vc1, vc1, vc1, vc1);
+
+    float vc2 = Cubic(-(float(n) - b));
+    float4 vecCoeff2 = float4(vc2, vc2, vc2, vc2);
+
+    nSum = nSum + (Samples * vecCoeff2 * vecCoeff1);
+    nDenom = nDenom + (vecCoeff2 * vecCoeff1); }}
+    return nSum / nDenom;
+}
+
+float4 TexSharpenPass(float4 color, float2 texcoord)
+{
+    float3 calcSharpen = lumCoeff * float(SharpenStrength);
+
+    float4 blurredColor = SampleBicubic(OGL2Texture, texcoord);
+    float3 sharpenedColor = (color.rgb - blurredColor.rgb);
+
+    float sharpenLuma = dot(sharpenedColor, calcSharpen);
+    sharpenLuma = clamp(sharpenLuma, -float(SharpenClamp), float(SharpenClamp));
+
+    color.rgb = color.rgb + sharpenLuma;
+    color.a = AvgLuminance(color.rgb);
+
+    #if DebugSharpen == 1
+    color = saturate(0.5f + float4(sharpenLuma * 4));
+    #endif
+
+    return saturate(color);
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                       [PIXEL VIBRANCE CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if PIXEL_VIBRANCE == 1
+float4 VibrancePass(float4 color, float2 texcoord)
+{
+    float vib = Vibrance;
+    
+    float lum = AvgLuminance(color.rgb);
+    float3 luma = float3(lum, lum, lum);
+
+    float colorMax = max(color.r, max(color.g, color.b));
+    float colorMin = min(color.r, min(color.g, color.b));
+
+    float colorSaturation = colorMax - colorMin;
+    float3 colorCoeff = float3(RedVibrance * vib, GreenVibrance * vib, BlueVibrance * vib);
+
+    color.rgb = lerp(luma, color.rgb, (1.0 + (colorCoeff * (1.0 - (sign(colorCoeff) * colorSaturation)))));
+    color.a = AvgLuminance(color.rgb);
+
+    return saturate(color); //Debug: return colorSaturation.xxxx;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                        [BLENDED BLOOM CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if BLENDED_BLOOM == 1
+float3 BlendAddLight(float3 bloom, float3 blend)
+{
+    return saturate(bloom + blend);
+}
+
+float3 BlendScreen(float3 bloom, float3 blend)
+{
+    return (bloom + blend) - (bloom * blend);
+}
+
+float3 BlendGlow(float3 bloom, float3 blend)
+{
+    float glow = AvgLuminance(bloom);
+    return lerp((bloom + blend) - (bloom * blend),
+    (blend + blend) - (blend * blend), glow);
+}
+
+float3 BlendAddGlow(float3 bloom, float3 blend)
+{
+    float addglow = smootherstep(0.0, 1.0, AvgLuminance(bloom));
+    return lerp(saturate(bloom + blend),
+    (blend + blend) - (blend * blend), addglow);
+}
+
+float3 BlendLuma(float3 bloom, float3 blend)
+{
+    float lumavg = smootherstep(0.0, 1.0, AvgLuminance(bloom + blend));
+    return lerp((bloom * blend), (1.0 -
+    ((1.0 - bloom) * (1.0 - blend))), lumavg);
+}
+
+float3 BlendOverlay(float3 bloom, float3 blend)
+{
+    float3 overlay = step(0.5, bloom);
+    return lerp((bloom * blend * 2.0), (1.0 - (2.0 *
+    (1.0 - bloom) * (1.0 - blend))), overlay);
+}
+
+float3 BloomCorrection(float3 color)
+{
+    float3 bloom = color;
+
+    bloom.r = 2.0 / 3.0 * (1.0 - (bloom.r * bloom.r));
+    bloom.g = 2.0 / 3.0 * (1.0 - (bloom.g * bloom.g));
+    bloom.b = 2.0 / 3.0 * (1.0 - (bloom.b * bloom.b));
+
+    bloom.r = saturate(color.r + float(BloomReds) * bloom.r);
+    bloom.g = saturate(color.g + float(BloomGreens) * bloom.g);
+    bloom.b = saturate(color.b + float(BloomBlues) * bloom.b);
+
+    color = bloom;
+
+    return color;
+}
+
+float4 DefocusFilter(sampler2D tex, float2 texcoord, float2 defocus)
+{
+    float2 texel = pixelSize * defocus;
+
+    float4 sampleA = sampleTex(tex, texcoord + float2(0.5, 0.5) * texel);
+    float4 sampleB = sampleTex(tex, texcoord + float2(-0.5, 0.5) * texel);
+    float4 sampleC = sampleTex(tex, texcoord + float2(0.5, -0.5) * texel);
+    float4 sampleD = sampleTex(tex, texcoord + float2(-0.5, -0.5) * texel);
+
+    float fx = frac(texcoord.x * screenSize.x);
+    float fy = frac(texcoord.y * screenSize.y);
+
+    float4 interpolateA = lerp(sampleA, sampleB, fx);
+    float4 interpolateB = lerp(sampleC, sampleD, fx);
+
+    return lerp(interpolateA, interpolateB, fy);
+}
+
+float4 BloomPass(float4 color, float2 texcoord)
+{
+    float anflare = 4.0;
+
+    float2 defocus = float2(BloomDefocus, BloomDefocus);
+    float4 bloom = DefocusFilter(OGL2Texture, texcoord, defocus);
+
+    float2 dx = float2(pixelSize.x * float(BloomWidth), 0.0);
+    float2 dy = float2(0.0, pixelSize.y * float(BloomWidth));
+
+    float2 mdx = float2(dx.x * defocus.x, 0.0);
+    float2 mdy = float2(0.0, dy.y * defocus.y);
+
+    float4 blend = bloom * 0.22520613262190495;
+
+    blend += 0.002589001911021066 * sampleTex(OGL2Texture, texcoord - mdx + mdy);
+    blend += 0.010778807494659370 * sampleTex(OGL2Texture, texcoord - dx + mdy);
+    blend += 0.024146616900339800 * sampleTex(OGL2Texture, texcoord + mdy);
+    blend += 0.010778807494659370 * sampleTex(OGL2Texture, texcoord + dx + mdy);
+    blend += 0.002589001911021066 * sampleTex(OGL2Texture, texcoord + mdx + mdy);
+
+    blend += 0.010778807494659370 * sampleTex(OGL2Texture, texcoord - mdx + dy);
+    blend += 0.044875475183061630 * sampleTex(OGL2Texture, texcoord - dx + dy);
+    blend += 0.100529757860782610 * sampleTex(OGL2Texture, texcoord + dy);
+    blend += 0.044875475183061630 * sampleTex(OGL2Texture, texcoord + dx + dy);
+    blend += 0.010778807494659370 * sampleTex(OGL2Texture, texcoord + mdx + dy);
+
+    blend += 0.024146616900339800 * sampleTex(OGL2Texture, texcoord - mdx);
+    blend += 0.100529757860782610 * sampleTex(OGL2Texture, texcoord - dx);
+    blend += 0.100529757860782610 * sampleTex(OGL2Texture, texcoord + dx);
+    blend += 0.024146616900339800 * sampleTex(OGL2Texture, texcoord + mdx);
+
+    blend += 0.010778807494659370 * sampleTex(OGL2Texture, texcoord - mdx - dy);
+    blend += 0.044875475183061630 * sampleTex(OGL2Texture, texcoord - dx - dy);
+    blend += 0.100529757860782610 * sampleTex(OGL2Texture, texcoord - dy);
+    blend += 0.044875475183061630 * sampleTex(OGL2Texture, texcoord + dx - dy);
+    blend += 0.010778807494659370 * sampleTex(OGL2Texture, texcoord + mdx - dy);
+
+    blend += 0.002589001911021066 * sampleTex(OGL2Texture, texcoord - mdx - mdy);
+    blend += 0.010778807494659370 * sampleTex(OGL2Texture, texcoord - dx - mdy);
+    blend += 0.024146616900339800 * sampleTex(OGL2Texture, texcoord - mdy);
+    blend += 0.010778807494659370 * sampleTex(OGL2Texture, texcoord + dx - mdy);
+    blend += 0.002589001911021066 * sampleTex(OGL2Texture, texcoord + mdx - mdy);
+    blend = lerp(color, blend, float(BlendStrength));
+
+    bloom.xyz = BloomType(bloom.xyz, blend.xyz);
+    bloom.xyz = BloomCorrection(bloom.xyz);
+
+    color.w = AvgLuminance(color.xyz);
+    bloom.w = AvgLuminance(bloom.xyz);
+    bloom.w *= anflare;
+
+    color = lerp(color, bloom, float(BloomStrength));
+
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                      [SCENE TONE MAPPING CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if SCENE_TONEMAPPING == 1
+float3 ScaleLuminance(float3 x)
+{
+    float W = 1.02;
+    float L = 0.06;
+    float C = 1.02;
+
+    float N = clamp(0.76 + ToneAmount, 1.0, 2.0);
+    float K = (N - L * C) / C;
+
+    float3 tone = L * C + (1.0 - L * C) * (1.0 + K * (x - L) /
+    ((W - L) * (W - L))) * (x - L) / (x - L + K);
+
+    float3 color;
+    color.r = (x.r > L) ? tone.r : C * x.r;
+    color.g = (x.g > L) ? tone.g : C * x.g;
+    color.b = (x.b > L) ? tone.b : C * x.b;
+
+    return color;
+}
+
+float3 TmMask(float3 color)
+{
+    float3 tone = color;
+
+    float highTone = 6.2; float greyTone = 0.4;
+    float midTone = 1.620; float lowTone = 0.06;
+
+    tone.r = (tone.r * (highTone * tone.r + greyTone))/(
+    tone.r * (highTone * tone.r + midTone) + lowTone);
+    tone.g = (tone.g * (highTone * tone.g + greyTone))/(
+    tone.g * (highTone * tone.g + midTone) + lowTone);
+    tone.b = (tone.b * (highTone * tone.b + greyTone))/(
+    tone.b * (highTone * tone.b + midTone) + lowTone);
+
+    const float gamma = 2.42;
+    tone = EncodeGamma(tone, gamma);
+
+    color = lerp(color, tone, float(MaskStrength));
+
+    return color;
+}
+
+float3 TmCurve(float3 color)
+{
+    float3 T = color;
+
+    float tnamn = ToneAmount;
+    float blevel = length(T);
+    float bmask = pow(blevel, 0.02);
+
+    float A = 0.100; float B = 0.300;
+    float C = 0.100; float D = tnamn;
+    float E = 0.020; float F = 0.300;
+
+    float W = 1.000;
+
+    T.r = ((T.r*(A*T.r + C*B) + D*E) / (T.r*(A*T.r + B) + D*F)) - E / F;
+    T.g = ((T.g*(A*T.g + C*B) + D*E) / (T.g*(A*T.g + B) + D*F)) - E / F;
+    T.b = ((T.b*(A*T.b + C*B) + D*E) / (T.b*(A*T.b + B) + D*F)) - E / F;
+
+    float denom = ((W*(A*W + C*B) + D*E) / (W*(A*W + B) + D*F)) - E / F;
+
+    float3 black = float3(bmask, bmask, bmask);
+    float3 white = float3(denom, denom, denom);
+
+    T = T / white;
+    T = T * black;
+
+    color = saturate(T);
+
+    return color;
+}
+
+float4 TonemapPass(float4 color, float2 texcoord)
+{
+    float3 tonemap = color.rgb;
+    
+    float blackLevel = length(tonemap);
+    tonemap = ScaleLuminance(tonemap);
+
+    float3 luma = float3(Luminance, Luminance, Luminance);
+    float luminanceAverage = AvgLuminance(luma);
+
+    if (TonemapMask == 1) { tonemap = TmMask(tonemap); }
+    if (TonemapType == 1) { tonemap = TmCurve(tonemap); }
+
+    // RGB -> XYZ conversion
+    const float3x3 RGB2XYZ = float3x3(0.4124564, 0.3575761, 0.1804375,
+                                      0.2126729, 0.7151522, 0.0721750,
+                                      0.0193339, 0.1191920, 0.9503041);
+
+    float3 XYZ = mul(RGB2XYZ, tonemap);
+
+    // XYZ -> Yxy conversion
+    float3 Yxy;
+
+    Yxy.r = XYZ.g;                                  // copy luminance Y
+    Yxy.g = XYZ.r / (XYZ.r + XYZ.g + XYZ.b);        // x = X / (X + Y + Z)
+    Yxy.b = XYZ.g / (XYZ.r + XYZ.g + XYZ.b);        // y = Y / (X + Y + Z)
+
+    // (Wt) Tone mapped scaling of the initial wp before input modifiers
+    float Wt = saturate(Yxy.r / AvgLuminance(XYZ));
+
+    if (TonemapType == 2) { Yxy.r = TmCurve(Yxy).r; }
+
+    // (Lp) Map average luminance to the middlegrey zone by scaling pixel luminance
+    float Lp = Yxy.r * float(Exposure) / (luminanceAverage + Epsilon);
+
+    // (Wp) White point calculated, based on the toned white, and input modifier
+    float Wp = dot(abs(Wt), float(WhitePoint));
+
+    // (Ld) Scale all luminance within a displayable range of 0 to 1
+    Yxy.r = (Lp * (1.0 + Lp / (Wp * Wp))) / (1.0 + Lp);
+
+    // Yxy -> XYZ conversion
+    XYZ.r = Yxy.r * Yxy.g / Yxy.b;                  // X = Y * x / y
+    XYZ.g = Yxy.r;                                  // copy luminance Y
+    XYZ.b = Yxy.r * (1.0 - Yxy.g - Yxy.b) / Yxy.b;  // Z = Y * (1-x-y) / y
+
+    if (TonemapType == 3) { XYZ = TmCurve(XYZ); }
+
+    // XYZ -> RGB conversion
+    const float3x3 XYZ2RGB = float3x3(3.2404542,-1.5371385,-0.4985314,
+                                     -0.9692660, 1.8760108, 0.0415560,
+                                      0.0556434,-0.2040259, 1.0572252);
+
+    tonemap = mul(XYZ2RGB, XYZ);
+
+    float shadowmask = pow(saturate(blackLevel), float(BlackLevels));
+    tonemap = tonemap * float3(shadowmask, shadowmask, shadowmask);
+
+    color.rgb = tonemap;
+    color.a = AvgLuminance(color.rgb);
+
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                      [CROSS PROCESSING CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if CROSS_PROCESSING == 1
+float3 CrossShift(float3 color)
+{
+    float3 cross;
+
+    float2 CrossMatrix[3] = float2[](
+    float2 (0.960, 0.040 * color.x),
+    float2 (0.980, 0.020 * color.y),
+    float2 (0.970, 0.030 * color.z) );
+
+    cross.x = float(RedShift) * CrossMatrix[0].x + CrossMatrix[0].y;
+    cross.y = float(GreenShift) * CrossMatrix[1].x + CrossMatrix[1].y;
+    cross.z = float(BlueShift) * CrossMatrix[2].x + CrossMatrix[2].y;
+
+    float lum = AvgLuminance(color);
+    float3 black = float3(0.0, 0.0, 0.0);
+    float3 white = float3(1.0, 1.0, 1.0);
+
+    cross = lerp(black, cross, saturate(lum * 2.0));
+    cross = lerp(cross, white, saturate(lum - 0.5) * 2.0);
+    color = lerp(color, cross, saturate(lum * float(ShiftRatio)));
+
+    return color;
+}
+
+float4 CrossPass(float4 color, float2 texcoord)
+{
+    #if FilmicProcess == 1
+    color.rgb = CrossShift(color.rgb);
+
+    #elif FilmicProcess == 2
+    float3 XYZ = RGBtoXYZ(color.rgb);
+    float3 Yxy = XYZtoYxy(XYZ);
+
+    Yxy = CrossShift(Yxy);
+    XYZ = YxytoXYZ(Yxy);
+
+    color.rgb = XYZtoRGB(XYZ);
+
+    #elif FilmicProcess == 3
+    float3 XYZ = RGBtoXYZ(color.rgb);
+    float3 Yxy = XYZtoYxy(XYZ);
+
+    XYZ = YxytoXYZ(Yxy);
+    XYZ = CrossShift(XYZ);
+
+    color.rgb = XYZtoRGB(XYZ);
+    #endif
+
+    color.a = AvgLuminance(color.rgb);
+
+    return saturate(color);
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                      [COLOR CORRECTION CODE SECTION]
+------------------------------------------------------------------------------*/
+
+// Converting pure hue to RGB
+float3 HUEtoRGB(float H)
+{
+    float R = abs(H * 6.0 - 3.0) - 1.0;
+    float G = 2.0 - abs(H * 6.0 - 2.0);
+    float B = 2.0 - abs(H * 6.0 - 4.0);
+
+    return saturate(float3(R, G, B));
+}
+
+// Converting RGB to hue/chroma/value
+float3 RGBtoHCV(float3 RGB)
+{
+    float4 BG = float4(RGB.bg,-1.0, 2.0 / 3.0);
+    float4 GB = float4(RGB.gb, 0.0,-1.0 / 3.0);
+
+    float4 P = (RGB.g < RGB.b) ? BG : GB;
+
+    float4 XY = float4(P.xyw, RGB.r);
+    float4 YZ = float4(RGB.r, P.yzx);
+
+    float4 Q = (RGB.r < P.x) ? XY : YZ;
+
+    float C = Q.x - min(Q.w, Q.y);
+    float H = abs((Q.w - Q.y) / (6.0 * C + Epsilon) + Q.z);
+
+    return float3(H, C, Q.x);
+}
+
+// Converting RGB to HSV
+float3 RGBtoHSV(float3 RGB)
+{
+    float3 HCV = RGBtoHCV(RGB);
+    float S = HCV.y / (HCV.z + Epsilon);
+
+    return float3(HCV.x, S, HCV.z);
+}
+
+// Converting HSV to RGB
+float3 HSVtoRGB(float3 HSV)
+{
+    float3 RGB = HUEtoRGB(HSV.x);
+    return ((RGB - 1.0) * HSV.y + 1.0) * HSV.z;
+}
+
+#if COLOR_CORRECTION == 1
+// Pre correction color mask
+float3 PreCorrection(float3 color)
+{
+    float3 RGB = color;
+
+    RGB.r = 2.0 / 3.0 * (1.0 - (RGB.r * RGB.r));
+    RGB.g = 2.0 / 3.0 * (1.0 - (RGB.g * RGB.g));
+    RGB.b = 2.0 / 3.0 * (1.0 - (RGB.b * RGB.b));
+
+    RGB.r = saturate(color.r + (float(ChannelR) / 200.0) * RGB.r);
+    RGB.g = saturate(color.g + (float(ChannelG) / 200.0) * RGB.g);
+    RGB.b = saturate(color.b + (float(ChannelB) / 200.0) * RGB.b);
+
+    color = saturate(RGB);
+
+    return color;
+}
+
+float3 ColorCorrection(float3 color)
+{
+    float X = 1.0 / (1.0 + exp(float(ChannelR) / 2.0));
+    float Y = 1.0 / (1.0 + exp(float(ChannelG) / 2.0));
+    float Z = 1.0 / (1.0 + exp(float(ChannelB) / 2.0));
+
+    color.r = (1.0 / (1.0 + exp(float(-ChannelR) * (color.r - 0.5))) - X) / (1.0 - 2.0 * X);
+    color.g = (1.0 / (1.0 + exp(float(-ChannelG) * (color.g - 0.5))) - Y) / (1.0 - 2.0 * Y);
+    color.b = (1.0 / (1.0 + exp(float(-ChannelB) * (color.b - 0.5))) - Z) / (1.0 - 2.0 * Z);
+
+    return saturate(color);
+}
+
+float4 CorrectionPass(float4 color, float2 texcoord)
+{
+    float3 colorspace = PreCorrection(color.rgb);
+
+    #if CorrectionPalette == 1
+    colorspace = ColorCorrection(colorspace);
+
+    #elif CorrectionPalette == 2
+    float3 XYZ = RGBtoXYZ(colorspace);
+    float3 Yxy = XYZtoYxy(XYZ);
+
+    Yxy = ColorCorrection(Yxy);
+    XYZ = YxytoXYZ(Yxy);
+    colorspace = XYZtoRGB(XYZ);
+
+    #elif CorrectionPalette == 3
+    float3 XYZ = RGBtoXYZ(colorspace);
+    float3 Yxy = XYZtoYxy(XYZ);
+
+    XYZ = YxytoXYZ(Yxy);
+    XYZ = ColorCorrection(XYZ);
+    colorspace = XYZtoRGB(XYZ);
+
+    #elif CorrectionPalette == 4
+    float3 hsv = RGBtoHSV(colorspace);
+    hsv = ColorCorrection(hsv);
+    colorspace = HSVtoRGB(hsv);
+
+    #elif CorrectionPalette == 5
+    float3 yuv = RGBtoYUV(colorspace);
+    yuv = ColorCorrection(yuv);
+    colorspace = YUVtoRGB(yuv);
+    #endif
+
+    color.rgb = lerp(color.rgb, colorspace, float(PaletteStrength));
+    color.a = AvgLuminance(color.rgb);
+
+    return color;
+}
+#endif
+
+
+/*------------------------------------------------------------------------------
+                       [S-CURVE CONTRAST CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if CURVE_CONTRAST == 1
+float4 ContrastPass(float4 color, float2 texcoord)
+{
+    float CurveBlend = CurvesContrast;
+
+    #if CurveType != 2
+    float lum = AvgLuminance(color.rgb);
+    float3 luma = float3(lum, lum, lum);
+    float3 chroma = color.rgb - luma;
+    #endif
+
+    #if CurveType == 2
+    float3 x = color.rgb;
+    #elif (CurveType == 1)
+    float3 x = chroma;
+    x = x * 0.5 + 0.5;
+    #else
+    float3 x = luma;
+    #endif
+
+    //S-Curve - Cubic Bezier spline
+    float3 a = float3(0.00, 0.00, 0.00);    //start point
+    float3 b = float3(0.25, 0.25, 0.25);    //control point 1
+    float3 c = float3(0.85, 0.85, 0.85);    //control point 2
+    float3 d = float3(1.00, 1.00, 1.00);    //endpoint
+
+    float3 ab = lerp(a, b, x);              //point between a and b (green)
+    float3 bc = lerp(b, c, x);              //point between b and c (green)
+    float3 cd = lerp(c, d, x);              //point between c and d (green)
+    float3 abbc = lerp(ab, bc, x);          //point between ab and bc (blue)
+    float3 bccd = lerp(bc, cd, x);          //point between bc and cd (blue)
+    float3 dest = lerp(abbc, bccd, x);      //point on the bezier-curve (black)
+
+    x = dest;
+
+    #if CurveType == 0 //Only Luma
+    x = lerp(luma, x, CurveBlend);
+    color.rgb = x + chroma;
+    #elif (CurveType == 1) //Only Chroma
+    x = x * 2 - 1;
+    float3 LColor = luma + x;
+    color.rgb = lerp(color.rgb, LColor, CurveBlend);
+    #elif (CurveType == 2) //Both Luma and Chroma
+    float3 LColor = x;
+    color.rgb = lerp(color.rgb, LColor, CurveBlend);
+    #endif
+
+    color.a = AvgLuminance(color.rgb);
+
+    return saturate(color);
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                         [CEL SHADING CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if CEL_SHADING == 1
+float3 CelColor(in float3 RGB)
+{
+    float3 HSV;
+    float CR = 1.0 / ColorRange, MS = Saturation, ML;
+    
+    HSV = RGBtoHSV(RGB);
+    
+    ML = fmod(HSV[2], CR);
+    HSV[1] *= MS;  HSV[2] += ((CR * (HSV[2] + 0.6)) - ML);
+    HSV[2] = clamp(HSV[2], float(int(HSV[2] / CR) - 1) * CR, float(int(HSV[2] / CR) + 1) * CR);
+    
+    RGB = HSVtoRGB(HSV);
+
+    return RGB;
+}
+
+float4 CelPass(float4 color, float2 texcoord)
+{   
+    const int NUM = 9;
+    
+    float3 yuv, sum = color.rgb;
+    float2 width = float2(0.1, 0.1);
+    float rounding = RoundingLevels;
+
+    float lum[NUM];
+    float3 col[NUM];
+    float2 set[NUM] = float2[](
+    float2(-0.0078125, -0.0078125),
+    float2(0.00, -0.0078125),
+    float2(0.0078125, -0.0078125),
+    float2(-0.0078125, 0.00),
+    float2(0.00, 0.00),
+    float2(0.0078125, 0.00),
+    float2(-0.0078125, 0.0078125),
+    float2(0.00, 0.0078125),
+    float2(0.0078125, 0.0078125) );
+
+    for (int i = 0; i < NUM; i++)
+    {
+        col[i] = sampleTex(OGL2Texture, texcoord + set[i] * width).rgb;
+        col[i] = CelColor(col[i]);
+
+        #if ColorRounding == 1
+        col[i].r = round(col[i].r * rounding) / rounding;
+        col[i].g = round(col[i].g * rounding) / rounding;
+        col[i].b = round(col[i].b * rounding) / rounding;
+        #endif
+
+        lum[i] = AvgLuminance(col[i].xyz);
+        yuv = RGBtoYUV(col[i]);
+        
+        #if UseYuvLuma == 1
+        yuv.r = round(yuv.r * rounding) / rounding;
+        #endif
+        
+        yuv = YUVtoRGB(yuv);
+        sum += yuv;
+    }
+
+    float3 shaded = sum / NUM;
+    float3 shadedColor = lerp(color.rgb, shaded, ShadedStrength);
+
+    float cs; float4 offset; float4 pos0 = texcoord.xyxy;
+    float px = textureSize(OGL2Texture, 0).x * float(EdgeScale);
+    float py = textureSize(OGL2Texture, 0).y * float(EdgeScale);
+
+    offset.xy = -(offset.zw = float2(1.0/px, 0.0));
+    float4 pos1 = pos0 + offset;
+
+    offset.xy = -(offset.zw = float2(0.0, 1.0/py));
+    float4 pos2 = pos0 + offset;
+
+    float4 pos3 = pos1 + 2.0 * offset;
+
+    float3 c0 = sampleTex(OGL2Texture, pos3.xy).rgb;
+    float3 c1 = sampleTex(OGL2Texture, pos2.xy).rgb;
+    float3 c2 = sampleTex(OGL2Texture, pos3.zy).rgb;
+    float3 c3 = sampleTex(OGL2Texture, pos1.xy).rgb;
+    float3 c5 = sampleTex(OGL2Texture, pos1.zw).rgb;
+    float3 c6 = sampleTex(OGL2Texture, pos3.xw).rgb;
+    float3 c7 = sampleTex(OGL2Texture, pos2.zw).rgb;
+    float3 c8 = sampleTex(OGL2Texture, pos3.zw).rgb;
+
+    float3 o = float3(1.0, 1.0, 1.0);
+    float3 h = float3(0.02, 0.02, 0.02);
+
+    float3 hz = h; float k = 0.02; float kz = EdgeFilter / 100.0;
+    float3 cz = (color.rgb + h) / (dot(o, color.rgb) + k);
+
+    hz = (cz - ((c0 + h) / (dot(o, c0) + k))); cs = kz  / (dot(hz, hz) + kz);
+    hz = (cz - ((c1 + h) / (dot(o, c1) + k))); cs += kz / (dot(hz, hz) + kz);
+    hz = (cz - ((c2 + h) / (dot(o, c2) + k))); cs += kz / (dot(hz, hz) + kz);
+    hz = (cz - ((c3 + h) / (dot(o, c3) + k))); cs += kz / (dot(hz, hz) + kz);
+    hz = (cz - ((c5 + h) / (dot(o, c5) + k))); cs += kz / (dot(hz, hz) + kz);
+    hz = (cz - ((c6 + h) / (dot(o, c6) + k))); cs += kz / (dot(hz, hz) + kz);
+    hz = (cz - ((c7 + h) / (dot(o, c7) + k))); cs += kz / (dot(hz, hz) + kz);
+    hz = (cz - ((c8 + h) / (dot(o, c8) + k))); cs += kz / (dot(hz, hz) + kz);
+
+    cs /= 8.0;
+
+    color.rgb = lerp(color.rgb, shadedColor, AvgLuminance(color.rgb)) * pow(cs, CelStrength);
+    color.a = AvgLuminance(color.rgb);
+
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                        [PAINT SHADING CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if PAINT_SHADING == 1
+float3 PaintShading(float3 color, float2 texcoord)
+{
+    float px = textureSize(OGL2Texture, 0).x * float(ResScale);
+    float py = textureSize(OGL2Texture, 0).y * float(ResScale);
+
+    float3 m0, m1, m2, m3, k0, k1, k2, k3, shade; int j, i;
+    float n = float((PaintRadius + 1.0) * (PaintRadius + 1.0));
+
+    for (j = int(-PaintRadius); j <= 0; ++j)  {
+    for (i = int(-PaintRadius); i <= 0; ++i)  {
+
+    shade = sampleTex(OGL2Texture, texcoord + float2(i, j) / float2(px, py)).rgb;
+    m0 += shade; k0 += shade * shade; }}
+
+    for (j = int(-PaintRadius); j <= 0; ++j) {
+    for (i = 0; i <= int(PaintRadius); ++i)  {
+    
+    shade = sampleTex(OGL2Texture, texcoord + float2(i, j) / float2(px, py)).rgb;
+    m1 += shade; k1 += shade * shade; }}
+
+    for (j = 0; j <= int(PaintRadius); ++j)  {
+    for (i = 0; i <= int(PaintRadius); ++i)  {
+    
+    shade = sampleTex(OGL2Texture, texcoord + float2(i, j) / float2(px, py)).rgb;
+    m2 += shade; k2 += shade * shade; }}
+
+    float min_sigma2 = 1e+2;
+    m0 /= n; k0 = abs(k0 / n - m0 * m0);
+
+    float sigma2 = k0.r + k0.g + k0.b;
+    if (sigma2 < min_sigma2) {
+    min_sigma2 = sigma2; color = m0; }
+
+    m1 /= n; k1 = abs(k1 / n - m1 * m1);
+    sigma2 = k1.r + k1.g + k1.b;
+
+    if (sigma2 < min_sigma2) {
+    min_sigma2 = sigma2; color = m1; }
+
+    m2 /= n; k2 = abs(k2 / n - m2 * m2);
+    sigma2 = k2.r + k2.g + k2.b;
+
+    if (sigma2 < min_sigma2) {
+    min_sigma2 = sigma2; color = m2; }
+    
+    #if UseCelEdges == 1
+    float cs; float4 offset; float4 pos0 = texcoord.xyxy;
+    float ppx = textureSize(OGL2Texture, 0).x * float(EdgeScale);
+    float ppy = textureSize(OGL2Texture, 0).y * float(EdgeScale);
+
+    offset.xy = -(offset.zw = float2(1.0/ppx, 0.0));
+    float4 pos1 = pos0 + offset;
+
+    offset.xy = -(offset.zw = float2(0.0, 1.0/ppy));
+    float4 pos2 = pos0 + offset;
+
+    float4 pos3 = pos1 + 2.0 * offset;
+
+    float3 c0 = sampleTex(OGL2Texture, pos3.xy).rgb;
+    float3 c1 = sampleTex(OGL2Texture, pos2.xy).rgb;
+    float3 c2 = sampleTex(OGL2Texture, pos3.zy).rgb;
+    float3 c3 = sampleTex(OGL2Texture, pos1.xy).rgb;
+    float3 c5 = sampleTex(OGL2Texture, pos1.zw).rgb;
+    float3 c6 = sampleTex(OGL2Texture, pos3.xw).rgb;
+    float3 c7 = sampleTex(OGL2Texture, pos2.zw).rgb;
+    float3 c8 = sampleTex(OGL2Texture, pos3.zw).rgb;
+
+    float3 o = float3(1.0, 1.0, 1.0);
+    float3 h = float3(0.02, 0.02, 0.02);
+
+    float3 hz = h; float k = 0.02; float kz = EdgeFilter / 100.0;
+    float3 cz = (color.rgb + h) / (dot(o, color.rgb) + k);
+
+    hz = (cz - ((c0 + h) / (dot(o, c0) + k))); cs = kz  / (dot(hz, hz) + kz);
+    hz = (cz - ((c1 + h) / (dot(o, c1) + k))); cs += kz / (dot(hz, hz) + kz);
+    hz = (cz - ((c2 + h) / (dot(o, c2) + k))); cs += kz / (dot(hz, hz) + kz);
+    hz = (cz - ((c3 + h) / (dot(o, c3) + k))); cs += kz / (dot(hz, hz) + kz);
+    hz = (cz - ((c5 + h) / (dot(o, c5) + k))); cs += kz / (dot(hz, hz) + kz);
+    hz = (cz - ((c6 + h) / (dot(o, c6) + k))); cs += kz / (dot(hz, hz) + kz);
+    hz = (cz - ((c7 + h) / (dot(o, c7) + k))); cs += kz / (dot(hz, hz) + kz);
+    hz = (cz - ((c8 + h) / (dot(o, c8) + k))); cs += kz / (dot(hz, hz) + kz);
+
+    cs /= 8.0;
+    
+    color.rgb *= pow(cs, CelStrength);
+    #endif
+
+    return color;
+}
+
+float4 PaintPass(float4 color, float2 texcoord)
+{
+    float3 paint = PaintShading(color.rgb, texcoord);
+    color.rgb = lerp(color.rgb, paint, float(PaintStrength));
+    color.a = AvgLuminance(color.rgb);
+
+    return color;
+}
+#endif
+
+
+/*------------------------------------------------------------------------------
+                      [COLOR GRADING CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if COLOR_GRADING == 1
+float RGBCVtoHUE(float3 RGB, float C, float V)
+{
+    float3 Delta = (V - RGB) / C;
+
+    Delta.rgb -= Delta.brg;
+    Delta.rgb += float3(2.0, 4.0, 6.0);
+    Delta.brg = step(V, RGB) * Delta.brg;
+
+    float H;
+    H = max(Delta.r, max(Delta.g, Delta.b));
+    return frac(H / 6);
+}
+
+float3 HSVComplement(float3 HSV)
+{
+    float3 complement = HSV;
+    complement.x -= 0.5;
+
+    if (complement.x < 0.0) { complement.x += 1.0; }
+    return(complement);
+}
+
+float HueLerp(float h1, float h2, float v)
+{
+    float d = abs(h1 - h2);
+
+    if (d <= 0.5)
+    { return lerp(h1, h2, v); }
+    else if (h1 < h2)
+    { return frac(lerp((h1 + 1.0), h2, v)); }
+    else
+    { return frac(lerp(h1, (h2 + 1.0), v)); }
+}
+
+float4 ColorGrading(float4 color, float2 texcoord)
+{
+    float3 guide = float3(RedGrading, GreenGrading, BlueGrading);
+    float amount = GradingStrength;
+    float correlation = Correlation;
+    float concentration = 2.00;
+
+    float3 colorHSV = RGBtoHSV(color.rgb);
+    float3 huePoleA = RGBtoHSV(guide);
+    float3 huePoleB = HSVComplement(huePoleA);
+
+    float dist1 = abs(colorHSV.x - huePoleA.x); if (dist1 > 0.5) dist1 = 1.0 - dist1;
+    float dist2 = abs(colorHSV.x - huePoleB.x); if (dist2 > 0.5) dist2 = 1.0 - dist2;
+
+    float descent = smoothstep(0.0, correlation, colorHSV.y);
+
+    float3 HSVColor = colorHSV;
+
+    if (dist1 < dist2)
+    {
+        float c = descent * amount * (1.0 - pow((dist1 * 2.0), 1.0 / concentration));
+        HSVColor.x = HueLerp(colorHSV.x, huePoleA.x, c);
+        HSVColor.y = lerp(colorHSV.y, huePoleA.y, c);
+    }
+    else
+    {
+        float c = descent * amount * (1.0 - pow((dist2 * 2.0), 1.0 / concentration));
+        HSVColor.x = HueLerp(colorHSV.x, huePoleB.x, c);
+        HSVColor.y = lerp(colorHSV.y, huePoleB.y, c);
+    }
+
+    color.rgb = HSVtoRGB(HSVColor);
+    color.a = AvgLuminance(color.rgb);
+
+    return saturate(color);
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                           [SCANLINES CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if SCANLINES == 1
+float4 ScanlinesPass(float4 color, float2 texcoord)
+{
+    float4 intensity;
+    float4 fragcoord = gl_FragCoord;
+
+    #if ScanlineType == 0
+    if (frac(fragcoord.y * 0.25) > ScanlineScale)
+    #elif (ScanlineType == 1)
+    if (frac(fragcoord.x * 0.25) > ScanlineScale)
+    #elif (ScanlineType == 2)
+    if (frac(fragcoord.x * 0.25) > ScanlineScale && frac(fragcoord.y * 0.5) > ScanlineScale)
+    #endif
+    {
+        intensity = float4(0.0, 0.0, 0.0, 0.0);
+    }
+    else
+    {
+        intensity = smoothstep(0.2, ScanlineBrightness, color) + normalize(float4(color.xyz, AvgLuminance(color.xyz)));
+    }
+
+    float level = (4.0 - texcoord.x) * ScanlineIntensity;
+
+    color = intensity * (0.5 - level) + color * 1.1;
+
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                          [VIGNETTE CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if VIGNETTE == 1
+float4 VignettePass(float4 color, float2 texcoord)
+{
+    const float2 VignetteCenter = float2(0.5, 0.5);
+    float2 tc = texcoord - VignetteCenter;
+
+    tc *= float2((screenSize.x / screenSize.y), VignetteRatio);
+    tc /= VignetteRadius;
+
+    float v = dot(tc, tc);
+
+    color.rgb *= (1.0 + pow(v, VignetteSlope * 0.25) * -VignetteAmount);
+
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                      [SUBPIXEL DITHERING CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if SP_DITHERING == 1
+float Random(float2 texcoord)
+{
+    float seed = dot(texcoord, float2(12.9898, 78.233));
+    float sine = sin(seed);
+    float noise = frac(sine * 43758.5453);
+
+    return noise;
+}
+
+float4 DitherPass(float4 color, float2 texcoord)
+{
+    float ditherBits = 8.0;
+
+    #if DitherMethod == 2       //random dithering
+
+    float noise = Random(gl_FragCoord.xy);
+    float ditherShift = (1.0 / (pow(2.0, ditherBits) - 1.0));
+    float ditherHalfShift = (ditherShift * 0.5);
+    ditherShift = ditherShift * noise - ditherHalfShift;
+
+    color.rgb += float3(-ditherShift, ditherShift, -ditherShift);
+
+    #if ShowMethod == 1
+        color.rgb = float3(noise);
+    #endif
+    
+    #elif DitherMethod == 1     //ordered dithering
+
+    float2 ditherSize = float2(1.0 / 16.0, 10.0 / 36.0);
+    float gridPosition = fract(dot(gl_FragCoord.xy, ditherSize) + 0.25);
+    float ditherShift = (0.25) * (1.0 / (pow(2.0, ditherBits) - 1.0));
+
+    float3 RGBShift = float3(ditherShift, -ditherShift, ditherShift);
+    RGBShift = lerp(2.0 * RGBShift, -2.0 * RGBShift, gridPosition);
+
+    color.rgb += RGBShift;
+
+    #if ShowMethod == 1
+        color.rgb = float3(gridPosition);
+    #endif
+    #endif
+
+    color.a = AvgLuminance(color.rgb);
+
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                           [DEBAND CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if DEBANDING == 1
+//Deband ported from gedosato
+#define DEBAND_SKIP_THRESHOLD_TEST 0   //[0:1] 1 = Skip threshold to see the unfiltered sampling pattern
+#define DEBAND_OUTPUT_BOOST 1.0        //[-2.0:2.0] Default = 1.0. Any value other than the default activates debug mode.
+#define DEBAND_OUTPUT_OFFSET 0.0       //[-1.0:3.0] Default = 0.0. Any value other than the default activates debug mode.
+
+float rand(float2 pos)
+{
+	return frac(sin(dot(pos, float2(12.9898, 78.233))) * 43758.5453);
+}
+
+bool is_within_threshold(float3 original, float3 other)
+{
+    bvec3 cond = notEqual(max(abs(original - other) - DebandThreshold, float3(0.0, 0.0, 0.0)), float3(0.0, 0.0, 0.0));
+    return !any(cond);
+}
+
+float4 DebandPass(float4 color, float2 texcoord)
+{
+    float2 step = pixelSize * DebandRadius;
+    float2 halfstep = step * 0.5;
+
+    // Compute additional sample positions
+    float2 seed = texcoord;
+    #if  (DebandOffsetMode == 1)
+    float2 offset = float2(rand(seed), 0.0);
+    #elif(DebandOffsetMode == 2)
+    float2 offset = float2(rand(seed).xx);
+    #elif(DebandOffsetMode == 3)
+    float2 offset = float2(rand(seed), rand(seed + float2(0.1, 0.2)));
+    #endif
+
+    float2 on[8] = float2[](
+    float2( offset.x,  offset.y) * step,
+    float2( offset.y, -offset.x) * step,
+    float2(-offset.x, -offset.y) * step,
+    float2(-offset.y,  offset.x) * step,
+    float2( offset.x,  offset.y) * halfstep,
+    float2( offset.y, -offset.x) * halfstep,
+    float2(-offset.x, -offset.y) * halfstep,
+    float2(-offset.y,  offset.x) * halfstep );
+
+    float3 col0 = color.rgb;
+    float4 accu = float4(col0, 1.0);
+
+    for(int i=0; i < int(DebandSampleCount); i++)
+    {
+        float4 cn = float4(sampleTex(OGL2Texture, texcoord + on[i]).rgb, 1.0);
+        
+        #if (DEBAND_SKIP_THRESHOLD_TEST == 0)
+        if(is_within_threshold(col0, cn.rgb))
+        #endif
+        
+        accu += cn;
+    }
+
+    accu.rgb /= accu.a;
+
+    // Boost to make it easier to inspect the effect's output
+    if(DEBAND_OUTPUT_OFFSET != 0.0 || DEBAND_OUTPUT_BOOST != 1.0)
+    {
+        accu.rgb -= DEBAND_OUTPUT_OFFSET;
+        accu.rgb *= DEBAND_OUTPUT_BOOST;
+    }
+
+    // Additional dithering
+    #if   (DebandDithering == 1)
+    //Ordered dithering
+    float dither_bit  = 8.0;
+    float grid_position = frac( dot(texcoord,(screenSize * float2(1.0/16.0,10.0/36.0))) + 0.25 );
+    float dither_shift = (0.25) * (1.0 / (pow(2,dither_bit) - 1.0));
+    float3 dither_shift_RGB = float3(dither_shift, -dither_shift, dither_shift);
+    dither_shift_RGB = lerp(2.0 * dither_shift_RGB, -2.0 * dither_shift_RGB, grid_position);
+    accu.rgb += dither_shift_RGB;
+    #elif (DebandDithering == 2)
+    //Random dithering
+    float dither_bit  = 8.0;
+    float sine = sin(dot(texcoord, float2(12.9898,78.233)));
+    float noise = frac(sine * 43758.5453 + texcoord.x);
+    float dither_shift = (1.0 / (pow(2,dither_bit) - 1.0));
+    float dither_shift_half = (dither_shift * 0.5);
+    dither_shift = dither_shift * noise - dither_shift_half;
+    accu.rgb += float3(-dither_shift, dither_shift, -dither_shift);
+    #elif (DebandDithering == 3)
+    float3 vDither = float3(dot(float2(171.0, 231.0), texcoord * screenSize)).xxx;
+    vDither.rgb = frac( vDither.rgb / float3( 103.0, 71.0, 97.0 ) ) - float3(0.5, 0.5, 0.5);
+    accu.rgb += (vDither.rgb / 255.0);
+    #endif
+
+    return accu;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                           [LOTTES CRT CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if LOTTES_CRT == 1
+float ToLinear1(float c)
+{
+    c = saturate(c);
+    return(c <= 0.04045) ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+}
+
+float3 ToLinear(float3 c)
+{
+    return float3(ToLinear1(c.r), ToLinear1(c.g), ToLinear1(c.b));
+}
+
+float ToSrgb1(float c)
+{
+    c = saturate(c);
+    return(c < 0.0031308 ? c * 12.92 : 1.055 * pow(c, 0.41666) -0.055);
+}
+
+float3 ToSrgb(float3 c)
+{
+    return float3(ToSrgb1(c.r), ToSrgb1(c.g), ToSrgb1(c.b));
+}
+
+float3 Fetch(float2 pos, float2 off)
+{
+    float2 res = (screenSize * ResolutionScale);
+    pos = round(pos * res + off) / res;
+    if(max(abs(pos.x - 0.5), abs(pos.y - 0.5)) > 0.5) { return float3(0.0, 0.0, 0.0); }
+
+    return ToLinear(sampleTex(OGL2Texture, pos.xy).rgb);
+}
+
+float2 Dist(float2 pos)
+{
+    float2 crtRes = float2(CRTSizeX, CRTSizeY);
+    float2 res = (crtRes * MaskResolutionScale);
+    pos = (pos * res);
+
+    return -((pos - floor(pos)) - float2(0.5, 0.5));
+}
+
+float Gaus(float pos, float scale)
+{
+    return exp2(scale * pos * pos);
+}
+
+float3 Horz3(float2 pos, float off)
+{
+    float3 b = Fetch(pos,float2(-1.0, off));
+    float3 c = Fetch(pos,float2( 0.0, off));
+    float3 d = Fetch(pos,float2( 1.0, off));
+    float dst = Dist(pos).x;
+
+    // Convert distance to weight.
+    float scale = FilterCRTAmount;
+    float wb = Gaus(dst-1.0, scale);
+    float wc = Gaus(dst+0.0, scale);
+    float wd = Gaus(dst+1.0, scale);
+
+    return (b*wb+c*wc+d*wd)/(wb+wc+wd);
+}
+
+float3 Horz5(float2 pos, float off)
+{
+    float3 a = Fetch(pos, float2(-2.0, off));
+    float3 b = Fetch(pos, float2(-1.0, off));
+    float3 c = Fetch(pos, float2( 0.0, off));
+    float3 d = Fetch(pos, float2( 1.0, off));
+    float3 e = Fetch(pos, float2( 2.0, off));
+    float dst = Dist(pos).x;
+
+    // Convert distance to weight.
+    float scale = FilterCRTAmount;
+
+    float wa = Gaus(dst-2.0, scale);
+    float wb = Gaus(dst-1.0, scale);
+    float wc = Gaus(dst+0.0, scale);
+    float wd = Gaus(dst+1.0, scale);
+    float we = Gaus(dst+2.0, scale);
+
+    return (a*wa+b*wb+c*wc+d*wd+e*we)/(wa+wb+wc+wd+we);
+}
+
+// Return scanline weight.
+float Scan(float2 pos, float off)
+{
+    float dst = Dist(pos).y;
+    return Gaus(dst+off, ScanBrightness);
+}
+
+float3 Tri(float2 pos)
+{
+    float3 a = Horz3(pos,-1.0);
+    float3 b = Horz5(pos, 0.0);
+    float3 c = Horz3(pos, 1.0);
+
+    float wa = Scan(pos,-1.0);
+    float wb = Scan(pos, 0.0);
+    float wc = Scan(pos, 1.0);
+
+    return a*wa+b*wb+c*wc;
+}
+
+float2 Warp(float2 pos)
+{
+    pos = pos * 2.0-1.0;    
+    pos *= float2(1.0 + (pos.y*pos.y) * (HorizontalWarp), 1.0 + (pos.x*pos.x) * (VerticalWarp));
+    return pos * 0.5 + 0.5;
+}
+
+float3 Mask(float2 pos)
+{
+    #if MaskingType == 1
+    // Very compressed TV style shadow mask.
+    float lines = MaskAmountLight;
+    float odd = 0.0;
+
+    if(frac(pos.x/6.0) < 0.5) odd = 1.0;
+    if (frac((pos.y + odd) / 2.0) < 0.5) lines = MaskAmountDark;
+    pos.x = frac(pos.x/3.0);
+    float3 mask = float3(MaskAmountDark, MaskAmountDark, MaskAmountDark);
+
+    if(pos.x < 0.333) mask.r = MaskAmountLight;
+    else if(pos.x < 0.666)mask.g = MaskAmountLight;
+    else mask.b = MaskAmountLight;
+    mask *= lines;
+
+    return mask;
+    
+    #elif MaskingType == 2
+    // Aperture-grille.
+    pos.x = frac(pos.x/3.0);
+    float3 mask = float3(MaskAmountDark, MaskAmountDark, MaskAmountDark);
+
+    if(pos.x < 0.333)mask.r = MaskAmountLight;
+    else if(pos.x < 0.666)mask.g = MaskAmountLight;
+    else mask.b = MaskAmountLight;
+
+    return mask;
+    
+    #elif MaskingType == 3
+    // Stretched VGA style shadow mask (same as prior shaders).
+    pos.x += pos.y*3.0;
+    float3 mask = float3(MaskAmountDark, MaskAmountDark, MaskAmountDark);
+    pos.x = frac(pos.x/6.0);
+
+    if(pos.x < 0.333)mask.r = MaskAmountLight;
+    else if(pos.x < 0.666)mask.g = MaskAmountLight;
+    else mask.b = MaskAmountLight;
+
+    return mask;
+    
+    #else
+    // VGA style shadow mask.
+    pos.xy = floor(pos.xy*float2(1.0, 0.5));
+    pos.x += pos.y*3.0;
+
+    float3 mask = float3(MaskAmountDark, MaskAmountDark, MaskAmountDark);
+    pos.x = frac(pos.x/6.0);
+
+    if(pos.x < 0.333)mask.r = MaskAmountLight;
+    else if(pos.x < 0.666)mask.g = MaskAmountLight;
+    else mask.b= MaskAmountLight;
+    return mask;
+    #endif
+}
+
+float4 LottesCRTPass(float4 color, float2 texcoord)
+{
+    float4 fragcoord = gl_FragCoord;
+    float2 inSize = textureSize(OGL2Texture, 0);
+    float2 pos = Warp(texcoord.xy * (inSize/screenSize)) * (screenSize/inSize);
+
+    #if UseShadowMask == 0
+    color.rgb = Tri(pos);
+    #else
+    color.rgb = Tri(pos);
+    color.rgb *= Mask(floor(texcoord.xy*(inSize.xy/screenSize)*screenSize.xy) + float2(0.5,0.5));
+    #endif
+    color.rgb = ToSrgb(color.rgb);
+    color.a = 1.0;
+
+    return color;
+}
+#endif
+
+/*------------------------------------------------------------------------------
+                           [PX BORDER CODE SECTION]
+------------------------------------------------------------------------------*/
+
+float4 BorderPass(float4 colorInput, float2 tex)
+{
+    float3 border_color_float = BorderColor / 255.0;
+
+    float2 border = (pixelSize.xy * BorderWidth);
+    float2 within_border = saturate((-tex * tex + tex) - (-border * border + border));
+
+    bvec2 cond = notEqual(within_border, vec2(0.0f, 0.0f));
+    colorInput.rgb = all(cond) ? colorInput.rgb : border_color_float;
+
+    return colorInput;
+
+}
+
+/*------------------------------------------------------------------------------
+                         [PHONG SHADING CODE SECTION]
+------------------------------------------------------------------------------*/
+
+#if PHONG_SHADING == 1
+ struct material
+{
+    vec4 ambient;
+    vec4 diffuse;
+    vec4 specular;
+    float shininess;
+};
+
+material frontMaterial = material
+(
+    gl_FrontMaterial.ambient,
+    gl_FrontMaterial.diffuse,
+    gl_FrontMaterial.specular,
+    gl_FrontMaterial.shininess
+);
+
+struct lightSource
+{
+    vec4 sceneColor;
+    vec4 position;
+    vec4 ambient;
+    vec4 diffuse;
+    vec4 specular;
+    float constantAttenuation;
+    float linearAttenuation;
+    float quadraticAttenuation;
+};
+
+lightSource light0 = lightSource
+(
+    gl_FrontLightModelProduct.sceneColor,
+    gl_LightSource[0].position,
+    gl_LightSource[0].ambient,
+    gl_LightSource[0].diffuse,
+    gl_LightSource[0].specular,
+    gl_LightSource[0].constantAttenuation,
+    gl_LightSource[0].linearAttenuation,
+    gl_LightSource[0].quadraticAttenuation
+ );
+
+float Attenuation(float dist)
+{
+    float consAtten = light0.constantAttenuation;
+    float lineAtten = light0.linearAttenuation;
+    float quadAtten = light0.quadraticAttenuation;
+
+    float atten = (1.0 / (consAtten + lineAtten * dist + quadAtten * dist * dist));
+
+    return atten;
+}
+
+vec4 PhongPass(vec4 color, vec2 texcoord)
+{
+    vec3 N = Normal;
+    vec3 L = normalize(light0.position.xyz);
+    vec3 H = normalize(halfVector);
+    vec3 V = normalize(-Vertex);
+    vec3 R = normalize(-reflect(L, N));
+
+    // calculate Ambient Term:  
+    vec4 amb = light0.ambient + frontMaterial.ambient;
+
+    // calculate Diffuse Term:  
+    vec4 diff = light0.diffuse * frontMaterial.diffuse *
+    max(dot(N, L), 0.0); diff = clamp(diff, 0.0, 1.0);     
+
+    // calculate Specular Term:
+    float dotH = max(dot(N, H), 0.0);
+    vec4 spec = light0.specular * frontMaterial.specular * pow(max(dot(R, V), 0.0),
+    pow(dotH, frontMaterial.shininess)); spec = clamp(spec, 0.0, 1.0);
+
+    // calculate attenuation
+    float dist = length(L);
+    float atten = Attenuation(dist);
+    
+    vec4 sceneColor = light0.sceneColor;
+    color *= sceneColor + (amb + diff + spec) * vec4(atten);
+
+    return color;
+}
+
+#endif
+
+/*------------------------------------------------------------------------------
+                     [MAIN() & COMBINE PASS CODE SECTION]
+------------------------------------------------------------------------------*/
+
+void main()
+{
+    float2 texcoord = TexCoord.xy;
+    float4 color = texture(OGL2Texture, texcoord);
+
+    #if BILINEAR_FILTERING == 1
+    color = BiLinearPass(color, texcoord);
+    #endif
+
+    #if GAUSSIAN_FILTERING == 1
+    color = GaussianPass(color, texcoord);
+    #endif
+
+    #if BICUBIC_FILTERING == 1
+    color = BiCubicPass(color, texcoord);
+    #endif
+
+    #if BILATERAL_FILTERING == 1
+    color = BilateralPass(color, texcoord);
+    #endif
+
+    #if BICUBLIC_SCALER == 1
+    color = BiCubicScalerPass(color, texcoord);
+    #endif
+
+    #if LANCZOS_SCALER == 1
+    color = LanczosScalerPass(color, texcoord);
+    #endif
+
+    #if NFAA == 1
+    color = NFAAPass(color, texcoord);
+    #endif
+
+    #if SSAA == 1
+    color = SSAAPass(color, texcoord);
+    #endif
+
+    #if FXAA == 1
+    color = FXAAPass(color, texcoord);
+    #endif
+
+    #if LOTTES_CRT == 1
+    color = LottesCRTPass(color, texcoord);
+    #endif
+    
+    #if PAINT_SHADING == 1
+    color = PaintPass(color, texcoord);
+    #endif
+
+    #if TEXTURE_SHARPEN == 1
+    color = TexSharpenPass(color, texcoord);
+    #endif
+
+    #if PHONG_SHADING == 1
+    color = PhongPass(color, texcoord);
+    #endif
+
+    #if GAMMA_CORRECTION == 1
+    color = GammaPass(color, texcoord);
+    #endif
+
+    #if PIXEL_VIBRANCE == 1
+    color = VibrancePass(color, texcoord);
+    #endif
+    
+    #if CEL_SHADING == 1
+    color = CelPass(color, texcoord);
+    #endif
+
+    #if COLOR_GRADING == 1
+    color = ColorGrading(color, texcoord);
+    #endif
+
+    #if COLOR_CORRECTION == 1
+    color = CorrectionPass(color, texcoord);
+    #endif
+
+    #if CROSS_PROCESSING == 1
+    color = CrossPass(color, texcoord);
+    #endif
+
+    #if BLENDED_BLOOM == 1
+    color = BloomPass(color, texcoord);
+    #endif
+
+    #if SCENE_TONEMAPPING == 1
+    color = TonemapPass(color, texcoord);
+    #endif
+
+    #if CURVE_CONTRAST == 1
+    color = ContrastPass(color, texcoord);
+    #endif
+
+    #if VIGNETTE == 1
+    color = VignettePass(color, texcoord);
+    #endif
+
+    #if SCANLINES == 1
+    color = ScanlinesPass(color, texcoord);
+    #endif
+
+    #if SP_DITHERING == 1
+    color = DitherPass(color, texcoord);
+    #endif
+
+    #if DEBANDING == 1
+    color = DebandPass(color, texcoord);
+    #endif
+
+    #if PX_BORDER == 1
+    color = BorderPass(color, texcoord);
+    #endif
+
+    FragColor = color;
+}
